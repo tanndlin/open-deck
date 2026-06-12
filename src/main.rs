@@ -1,0 +1,48 @@
+use hidapi::HidApi;
+
+const ELGATO_VID: u16 = 0x0fd9;
+
+fn main() -> anyhow::Result<()> {
+    let api = HidApi::new()?;
+
+    // Find all connected Elgato devices
+    for dev in api.device_list() {
+        if dev.vendor_id() == ELGATO_VID {
+            println!(
+                "Found: {:?} PID={:#06x}",
+                dev.product_string(),
+                dev.product_id()
+            );
+        }
+    }
+
+    let device = api.open(ELGATO_VID, 0x006d)?;
+    device.set_blocking_mode(false)?; // non-blocking so we can poll
+
+    let mut buf = [0u8; 512];
+    let header_len = 4;
+
+    loop {
+        match device.read(&mut buf) {
+            Ok(0) => {
+                // timeout — no state change, keep polling
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Ok(n) => {
+                // buf[0] = report ID (0x01)
+                // buf[1..4] = header bytes to skip
+                // buf[4..n] = one byte per key, 0x01 = pressed, 0x00 = released
+                let key_states = &buf[header_len..n];
+
+                for (key_index, &state) in key_states.iter().enumerate() {
+                    match state {
+                        0x01 => println!("Key {} pressed", key_index),
+                        0x00 => {} // released / unchanged
+                        _ => {}    // shouldn't happen
+                    }
+                }
+            }
+            Err(e) => eprintln!("HID read error: {e}"),
+        }
+    }
+}
