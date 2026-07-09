@@ -1,17 +1,21 @@
 use hidapi::HidApi;
 
-use crate::push_image::load_key_icons;
+use crate::config::load_key_config;
+use crate::push_image::{clear_all_keys, load_key_icons};
 
+mod config;
 mod push_image;
 
 const ELGATO_VID: u16 = 0x0fd9;
 const STREAMDECK_MK2_PID: u16 = 0x006d;
 const KEY_COUNT: u8 = 15;
+const CONFIG_PATH: &str = "config.json";
 
 fn main() -> anyhow::Result<()> {
     let api = HidApi::new()?;
 
     // Find all connected Elgato devices
+    #[cfg(debug_assertions)]
     for dev in api.device_list() {
         if dev.vendor_id() == ELGATO_VID {
             println!(
@@ -24,7 +28,11 @@ fn main() -> anyhow::Result<()> {
 
     let device = api.open(ELGATO_VID, STREAMDECK_MK2_PID)?;
 
-    load_key_icons(&device)?;
+    clear_all_keys(&device)?;
+    match load_key_config(CONFIG_PATH)? {
+        Some(key_paths) => load_key_icons(&device, &key_paths)?,
+        None => println!("No icon config at {CONFIG_PATH}, skipping"),
+    }
 
     device.set_blocking_mode(false)?; // non-blocking so we can poll
 
