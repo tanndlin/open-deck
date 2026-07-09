@@ -1,6 +1,12 @@
 use hidapi::HidApi;
 
+use crate::push_image::load_key_icons;
+
+mod push_image;
+
 const ELGATO_VID: u16 = 0x0fd9;
+const STREAMDECK_MK2_PID: u16 = 0x006d;
+const KEY_COUNT: u8 = 15;
 
 fn main() -> anyhow::Result<()> {
     let api = HidApi::new()?;
@@ -16,7 +22,10 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    let device = api.open(ELGATO_VID, 0x006d)?;
+    let device = api.open(ELGATO_VID, STREAMDECK_MK2_PID)?;
+
+    load_key_icons(&device)?;
+
     device.set_blocking_mode(false)?; // non-blocking so we can poll
 
     let mut buf = [0u8; 512];

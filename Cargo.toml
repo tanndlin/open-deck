@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.102"
 hidapi = "2.6.6"
+image = "0.25"
