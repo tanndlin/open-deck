@@ -94,9 +94,22 @@ pub fn clear_all_keys(device: &HidDevice) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Loads the image at `path` and pushes it to `key`.
+/// Loads an image from a local file path or, if `source` is an `http(s)`
+/// URL, downloads it — so icons can point at a link instead of requiring the
+/// image to be saved to disk first.
+pub fn load_image(source: &str) -> anyhow::Result<DynamicImage> {
+    if source.starts_with("http://") || source.starts_with("https://") {
+        let bytes = ureq::get(source).call()?.body_mut().read_to_vec()?;
+        Ok(image::load_from_memory(&bytes)?)
+    } else {
+        Ok(image::open(source)?)
+    }
+}
+
+/// Loads the image at `path` (a local path or `http(s)` URL) and pushes it
+/// to `key`.
 pub fn set_key_icon(device: &HidDevice, key: u8, path: &str) -> anyhow::Result<()> {
-    let img = image::open(path)?;
+    let img = load_image(path)?;
     let jpeg = encode_key_image(&img)?;
     set_key_image(device, key, &jpeg)
 }

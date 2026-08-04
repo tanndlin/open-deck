@@ -94,12 +94,45 @@ async fn get_key_image(
     };
     let path = path.ok_or_else(|| (StatusCode::NOT_FOUND, format!("no icon set for key {id}")))?;
 
+    if path.starts_with("http://") || path.starts_with("https://") {
+        let (bytes, mime) = tokio::task::spawn_blocking(move || fetch_remote_icon(&path))
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))??;
+        return Ok(([(header::CONTENT_TYPE, mime)], bytes).into_response());
+    }
+
     let bytes = tokio::fs::read(&path)
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, format!("failed to read icon: {e}")))?;
     let mime = mime_guess::from_path(&path).first_or_octet_stream();
 
     Ok(([(header::CONTENT_TYPE, mime.as_ref())], bytes).into_response())
+}
+
+/// Downloads a remote icon and returns its bytes with a best-effort content
+/// type: the server's own `Content-Type` if it sent one, otherwise a guess
+/// from the URL's extension.
+fn fetch_remote_icon(url: &str) -> Result<(Vec<u8>, String), ApiError> {
+    let mut response = ureq::get(url).call().map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("failed to fetch icon: {e}"),
+        )
+    })?;
+    let mime = response.body_mut().mime_type().map_or_else(
+        || {
+            mime_guess::from_path(url)
+                .first_or_octet_stream()
+                .to_string()
+        },
+        str::to_owned,
+    );
+    let bytes = response
+        .body_mut()
+        .read_to_vec()
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("failed to read icon: {e}")))?;
+
+    Ok((bytes, mime))
 }
 
 #[derive(Deserialize)]
