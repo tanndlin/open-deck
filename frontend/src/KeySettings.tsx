@@ -14,7 +14,10 @@ interface KeySettingsProps {
 
 // Action kinds the UI knows how to edit. Add a case here (and to the switch
 // in the action editor below) for each new `KeyAction` variant.
-const ACTION_TYPES = [{ value: 'run_command', label: 'Run command' }] as const;
+const ACTION_TYPES = [
+  { value: 'run_command', label: 'Run command' },
+  { value: 'open_url', label: 'Open webpage' },
+] as const;
 
 export function KeySettings({
   id,
@@ -38,6 +41,7 @@ export function KeySettings({
   const [command, setCommand] = useState(
     action?.type === 'run_command' ? action.command : '',
   );
+  const [url, setUrl] = useState(action?.type === 'open_url' ? action.url : '');
 
   useEffect(() => setPreviewBroken(false), [path, version]);
 
@@ -65,11 +69,13 @@ export function KeySettings({
     switch (actionType) {
       case 'run_command':
         return { type: 'run_command', command: command.trim() };
+      case 'open_url':
+        return { type: 'open_url', url: url.trim() };
     }
   }
 
   const actionValid =
-    actionType === 'run_command' ? command.trim() !== '' : false;
+    actionType === 'run_command' ? command.trim() !== '' : url.trim() !== '';
 
   return (
     <div
@@ -171,6 +177,20 @@ export function KeySettings({
           </label>
         )}
 
+        {actionType === 'open_url' && (
+          <label className="flex flex-col gap-1.5 text-[13px] text-text">
+            URL
+            <input
+              type="text"
+              className="rounded-sm border border-border bg-bg px-2 py-1.5 font-mono text-sm text-text-h"
+              value={url}
+              placeholder="https://example.com"
+              disabled={busy}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+          </label>
+        )}
+
         {error && <div className="text-[13px] text-[#e5484d]">{error}</div>}
 
         <div className="flex gap-2">
@@ -187,7 +207,12 @@ export function KeySettings({
             className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
             disabled={busy || action === undefined}
             onClick={() =>
-              run(() => onClearAction(id).then(() => setCommand('')))
+              run(() =>
+                onClearAction(id).then(() => {
+                  setCommand('');
+                  setUrl('');
+                }),
+              )
             }
           >
             Clear action

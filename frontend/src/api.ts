@@ -3,8 +3,13 @@ export interface RunCommandAction {
   command: string;
 }
 
+export interface OpenUrlAction {
+  type: 'open_url';
+  url: string;
+}
+
 /** Union of all action kinds. Add new variants here as the backend gains them. */
-export type KeyAction = RunCommandAction;
+export type KeyAction = RunCommandAction | OpenUrlAction;
 
 export interface KeyConfig {
   icon?: string;
