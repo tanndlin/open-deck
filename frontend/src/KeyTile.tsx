@@ -16,17 +16,23 @@ export function KeyTile({ id, path, version, onClick }: KeyTileProps) {
   const showImage = path !== undefined && !broken;
 
   return (
-    <button type="button" className="key-tile" onClick={() => onClick(id)}>
-      <span className="key-tile-number">{id}</span>
+    <button
+      type="button"
+      className="relative aspect-square cursor-pointer overflow-hidden rounded-[10px] border border-border bg-code-bg p-0 hover:border-accent-border"
+      onClick={() => onClick(id)}
+    >
+      <span className="absolute top-1 left-1.5 z-1 font-mono text-xs text-text-h opacity-60">
+        {id}
+      </span>
       {showImage ? (
         <img
-          className="key-tile-image"
+          className="block h-full w-full object-cover"
           src={keyImageUrl(id, version)}
           alt={`Key ${id}`}
           onError={() => setBroken(true)}
         />
       ) : (
-        <span className="key-tile-empty" />
+        <span className="block h-full w-full" />
       )}
     </button>
   );

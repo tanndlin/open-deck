@@ -10,7 +10,14 @@ interface KeySettingsProps {
   onClear: (id: number) => Promise<void>;
 }
 
-export function KeySettings({ id, path, version, onClose, onSet, onClear }: KeySettingsProps) {
+export function KeySettings({
+  id,
+  path,
+  version,
+  onClose,
+  onSet,
+  onClear,
+}: KeySettingsProps) {
   const [draft, setDraft] = useState(path ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,31 +46,46 @@ export function KeySettings({ id, path, version, onClose, onSet, onClear }: KeyS
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>Key {id}</h2>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
+    <div
+      className="fixed inset-0 z-10 flex items-center justify-center bg-black/50"
+      onClick={onClose}
+    >
+      <div
+        className="flex w-[min(320px,calc(100vw-32px))] flex-col gap-3.5 rounded-[10px] border border-border bg-bg p-5 shadow-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="m-0">Key {id}</h2>
+          <button
+            type="button"
+            className="cursor-pointer border-none bg-transparent p-1 text-xl leading-none text-text-h"
+            onClick={onClose}
+            aria-label="Close"
+          >
             ×
           </button>
         </div>
 
-        <div className="modal-preview">
+        <div className="mx-auto flex aspect-square w-35 items-center justify-center overflow-hidden rounded-[10px] border border-border bg-code-bg">
           {path !== undefined && !previewBroken ? (
             <img
+              className="h-full w-full object-cover"
               src={keyImageUrl(id, version)}
               alt={`Key ${id}`}
               onError={() => setPreviewBroken(true)}
             />
           ) : (
-            <span className="modal-preview-empty">No icon set</span>
+            <span className="px-3 text-center text-[13px] text-text">
+              No icon set
+            </span>
           )}
         </div>
 
-        <label className="modal-field">
+        <label className="flex flex-col gap-1.5 text-[13px] text-text">
           Icon path
           <input
             type="text"
+            className="rounded-sm border border-border bg-bg px-2 py-1.5 font-mono text-sm text-text-h"
             value={draft}
             placeholder="icons/example.png"
             disabled={busy}
@@ -72,11 +94,12 @@ export function KeySettings({ id, path, version, onClose, onSet, onClear }: KeyS
           />
         </label>
 
-        {error && <div className="key-tile-error">{error}</div>}
+        {error && <div className="text-[13px] text-[#e5484d]">{error}</div>}
 
-        <div className="modal-actions">
+        <div className="flex gap-2">
           <button
             type="button"
+            className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
             disabled={busy || draft.trim() === ''}
             onClick={() => run(() => onSet(id, draft.trim()))}
           >
@@ -84,12 +107,18 @@ export function KeySettings({ id, path, version, onClose, onSet, onClear }: KeyS
           </button>
           <button
             type="button"
+            className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
             disabled={busy || path === undefined}
             onClick={() => run(() => onClear(id).then(() => setDraft('')))}
           >
             Clear
           </button>
-          <button type="button" onClick={onClose} disabled={busy}>
+          <button
+            type="button"
+            className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={onClose}
+            disabled={busy}
+          >
             Close
           </button>
         </div>

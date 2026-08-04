@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { clearKey, getKeyCount, listKeys, setKey, type KeyMap } from './api';
-import { KeyTile } from './KeyTile';
 import { KeySettings } from './KeySettings';
-import './App.css';
+import { KeyTile } from './KeyTile';
 
 function App() {
   const [keyCount, setKeyCount] = useState<number | null>(null);
@@ -38,17 +37,21 @@ function App() {
   }
 
   return (
-    <>
-      <header>
+    <main className="flex min-h-svh flex-col gap-6 p-4 text-center">
+      <header className="mb-6">
         <h1>Stream Deck Settings</h1>
       </header>
 
-      {error && <div className="banner-error">{error}</div>}
+      {error && (
+        <div className="mb-4 rounded-lg border border-accent-border bg-accent-bg px-4 py-3 text-text-h">
+          {error}
+        </div>
+      )}
 
       {keyCount === null ? (
         <p>Loading…</p>
       ) : (
-        <div className="key-grid">
+        <div className="grid max-w-160 grid-cols-5 gap-3 m-auto">
           {Array.from({ length: keyCount }, (_, id) => (
             <KeyTile
               key={id}
@@ -71,7 +74,7 @@ function App() {
           onClear={handleClear}
         />
       )}
-    </>
+    </main>
   );
 }
 
