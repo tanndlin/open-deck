@@ -13,3 +13,10 @@ pub fn load_key_config(path: &str) -> anyhow::Result<Option<HashMap<u8, String>>
     let key_paths: HashMap<u8, String> = serde_json::from_str(&config_str)?;
     Ok(Some(key_paths))
 }
+
+/// Writes the key index -> icon file path mapping back to the config file.
+pub fn save_key_config(path: &str, key_paths: &HashMap<u8, String>) -> anyhow::Result<()> {
+    let config_str = serde_json::to_string_pretty(key_paths)?;
+    std::fs::write(path, config_str)?;
+    Ok(())
+}

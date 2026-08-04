@@ -88,6 +88,13 @@ pub fn clear_all_keys(device: &HidDevice) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Loads the image at `path` and pushes it to `key`.
+pub fn set_key_icon(device: &HidDevice, key: u8, path: &str) -> anyhow::Result<()> {
+    let img = image::open(path)?;
+    let jpeg = encode_key_image(img)?;
+    set_key_image(device, key, &jpeg)
+}
+
 /// Loads the image at each configured path and pushes it to the matching
 /// key. Keys without an entry in `key_paths` are left as-is.
 pub fn load_key_icons(device: &HidDevice, key_paths: &HashMap<u8, String>) -> anyhow::Result<()> {
@@ -97,9 +104,7 @@ pub fn load_key_icons(device: &HidDevice, key_paths: &HashMap<u8, String>) -> an
             continue;
         }
 
-        let img = image::open(path)?;
-        let jpeg = encode_key_image(img)?;
-        set_key_image(device, key, &jpeg)?;
+        set_key_icon(device, key, path)?;
 
         #[cfg(debug_assertions)]
         println!("Set key {key} image from {path}");
