@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react';
-import { clearKey, getKeyCount, listKeys, setKey, type KeyMap } from './api';
+import {
+  clearKeyAction,
+  clearKeyIcon,
+  getKeyCount,
+  listKeys,
+  setKeyAction,
+  setKeyIcon,
+  type KeyAction,
+  type KeyMap,
+} from './api';
 import { KeySettings } from './KeySettings';
 import { KeyTile } from './KeyTile';
 
@@ -26,13 +35,23 @@ function App() {
     refresh();
   }, []);
 
-  async function handleSet(id: number, path: string) {
-    await setKey(id, path);
+  async function handleSetIcon(id: number, path: string) {
+    await setKeyIcon(id, path);
     await refresh();
   }
 
-  async function handleClear(id: number) {
-    await clearKey(id);
+  async function handleClearIcon(id: number) {
+    await clearKeyIcon(id);
+    await refresh();
+  }
+
+  async function handleSetAction(id: number, action: KeyAction) {
+    await setKeyAction(id, action);
+    await refresh();
+  }
+
+  async function handleClearAction(id: number) {
+    await clearKeyAction(id);
     await refresh();
   }
 
@@ -56,7 +75,7 @@ function App() {
             <KeyTile
               key={id}
               id={id}
-              path={keys[id]}
+              path={keys[id]?.icon}
               version={version}
               onClick={setSelectedKey}
             />
@@ -67,11 +86,13 @@ function App() {
       {selectedKey !== null && (
         <KeySettings
           id={selectedKey}
-          path={keys[selectedKey]}
+          config={keys[selectedKey] ?? {}}
           version={version}
           onClose={() => setSelectedKey(null)}
-          onSet={handleSet}
-          onClear={handleClear}
+          onSetIcon={handleSetIcon}
+          onClearIcon={handleClearIcon}
+          onSetAction={handleSetAction}
+          onClearAction={handleClearAction}
         />
       )}
     </main>

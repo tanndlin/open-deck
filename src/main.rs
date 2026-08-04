@@ -3,9 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use hidapi::{HidApi, HidDevice};
 
-use crate::config::load_key_config;
+use crate::config::{KeyConfigMap, load_key_config};
 use crate::push_image::{clear_all_keys, load_key_icons};
 
+mod action;
 mod api;
 mod assets;
 mod config;
@@ -20,7 +21,7 @@ const API_ADDR: &str = "127.0.0.1:3000";
 /// State shared between the HID polling loop and the REST API.
 struct AppState {
     device: Mutex<HidDevice>,
-    keys: Mutex<HashMap<u8, String>>,
+    keys: Mutex<KeyConfigMap>,
     config_path: String,
 }
 
@@ -44,12 +45,12 @@ async fn main() -> anyhow::Result<()> {
 
     clear_all_keys(&device)?;
     let keys = match load_key_config(CONFIG_PATH)? {
-        Some(key_paths) => {
-            load_key_icons(&device, &key_paths)?;
-            key_paths
+        Some(keys) => {
+            load_key_icons(&device, &keys)?;
+            keys
         }
         None => {
-            println!("No icon config at {CONFIG_PATH}, skipping");
+            println!("No config at {CONFIG_PATH}, skipping");
             HashMap::new()
         }
     };
@@ -77,6 +78,7 @@ async fn main() -> anyhow::Result<()> {
 fn poll_keys(state: &AppState) {
     let mut buf = [0u8; 512];
     let header_len = 4;
+    let mut pressed = [false; KEY_COUNT as usize];
 
     loop {
         let read_result = {
@@ -96,14 +98,30 @@ fn poll_keys(state: &AppState) {
                 let key_states = &buf[header_len..n];
 
                 for (key_index, &key_state) in key_states.iter().enumerate() {
-                    match key_state {
-                        0x01 => println!("Key {} pressed", key_index),
-                        0x00 => {} // released / unchanged
-                        _ => {}    // shouldn't happen
+                    if key_index >= pressed.len() {
+                        break;
                     }
+                    let is_pressed = key_state == 0x01;
+                    // only fire on the release->press edge, not every report
+                    // while the key is held down
+                    if is_pressed && !pressed[key_index] {
+                        println!("Key {} pressed", key_index);
+                        run_key_action(state, key_index as u8);
+                    }
+                    pressed[key_index] = is_pressed;
                 }
             }
             Err(e) => eprintln!("HID read error: {e}"),
         }
+    }
+}
+
+fn run_key_action(state: &AppState, key: u8) {
+    let action = {
+        let keys = state.keys.lock().unwrap();
+        keys.get(&key).and_then(|c| c.action.clone())
+    };
+    if let Some(action) = action {
+        action.execute();
     }
 }

@@ -1,9 +1,8 @@
-use std::collections::HashMap;
-
 use hidapi::HidDevice;
 use image::{ColorType, DynamicImage, Rgb, RgbImage, codecs::jpeg::JpegEncoder};
 
 use crate::KEY_COUNT;
+use crate::config::KeyConfigMap;
 
 // MK.2 key images are 72x72 JPEGs, mirrored on both axes to match how the
 // panel is physically mounted behind each button.
@@ -95,10 +94,12 @@ pub fn set_key_icon(device: &HidDevice, key: u8, path: &str) -> anyhow::Result<(
     set_key_image(device, key, &jpeg)
 }
 
-/// Loads the image at each configured path and pushes it to the matching
-/// key. Keys without an entry in `key_paths` are left as-is.
-pub fn load_key_icons(device: &HidDevice, key_paths: &HashMap<u8, String>) -> anyhow::Result<()> {
-    for (&key, path) in key_paths {
+/// Loads the icon for each configured key and pushes it to the device. Keys
+/// with no icon (or no entry at all) are left as-is.
+pub fn load_key_icons(device: &HidDevice, keys: &KeyConfigMap) -> anyhow::Result<()> {
+    for (&key, config) in keys {
+        let Some(path) = &config.icon else { continue };
+
         if key >= KEY_COUNT {
             eprintln!("Skipping key {key}: out of range (device has {KEY_COUNT} keys)");
             continue;

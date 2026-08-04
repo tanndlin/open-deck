@@ -1,27 +1,39 @@
 import { useEffect, useState } from 'react';
-import { keyImageUrl } from './api';
+import { keyImageUrl, type KeyAction, type KeyConfig } from './api';
 
 interface KeySettingsProps {
   id: number;
-  path?: string;
+  config: KeyConfig;
   version: number;
   onClose: () => void;
-  onSet: (id: number, path: string) => Promise<void>;
-  onClear: (id: number) => Promise<void>;
+  onSetIcon: (id: number, path: string) => Promise<void>;
+  onClearIcon: (id: number) => Promise<void>;
+  onSetAction: (id: number, action: KeyAction) => Promise<void>;
+  onClearAction: (id: number) => Promise<void>;
 }
+
+// Action kinds the UI knows how to edit. Add a case here (and to the switch
+// in the action editor below) for each new `KeyAction` variant.
+const ACTION_TYPES = [{ value: 'run_command', label: 'Run command' }] as const;
 
 export function KeySettings({
   id,
-  path,
+  config,
   version,
   onClose,
-  onSet,
-  onClear,
+  onSetIcon,
+  onClearIcon,
+  onSetAction,
+  onClearAction,
 }: KeySettingsProps) {
+  const { icon: path, action } = config;
   const [draft, setDraft] = useState(path ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewBroken, setPreviewBroken] = useState(false);
+
+  const [actionType, setActionType] = useState<KeyAction['type']>(action?.type ?? 'run_command');
+  const [command, setCommand] = useState(action?.type === 'run_command' ? action.command : '');
 
   useEffect(() => setPreviewBroken(false), [path, version]);
 
@@ -45,13 +57,22 @@ export function KeySettings({
     }
   }
 
+  function buildAction(): KeyAction {
+    switch (actionType) {
+      case 'run_command':
+        return { type: 'run_command', command: command.trim() };
+    }
+  }
+
+  const actionValid = actionType === 'run_command' ? command.trim() !== '' : false;
+
   return (
     <div
       className="fixed inset-0 z-10 flex items-center justify-center bg-black/50"
       onClick={onClose}
     >
       <div
-        className="flex w-[min(320px,calc(100vw-32px))] flex-col gap-3.5 rounded-[10px] border border-border bg-bg p-5 shadow-modal"
+        className="flex w-[min(360px,calc(100vw-32px))] flex-col gap-3.5 rounded-[10px] border border-border bg-bg p-5 shadow-modal"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -94,28 +115,79 @@ export function KeySettings({
           />
         </label>
 
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={busy || draft.trim() === ''}
+            onClick={() => run(() => onSetIcon(id, draft.trim()))}
+          >
+            Set icon
+          </button>
+          <button
+            type="button"
+            className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={busy || path === undefined}
+            onClick={() => run(() => onClearIcon(id).then(() => setDraft('')))}
+          >
+            Clear icon
+          </button>
+        </div>
+
+        <hr className="w-full border-border" />
+
+        <label className="flex flex-col gap-1.5 text-[13px] text-text">
+          Action on press
+          <select
+            className="rounded-sm border border-border bg-bg px-2 py-1.5 text-sm text-text-h"
+            value={actionType}
+            disabled={busy}
+            onChange={(e) => setActionType(e.target.value as KeyAction['type'])}
+          >
+            {ACTION_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {actionType === 'run_command' && (
+          <label className="flex flex-col gap-1.5 text-[13px] text-text">
+            Command
+            <input
+              type="text"
+              className="rounded-sm border border-border bg-bg px-2 py-1.5 font-mono text-sm text-text-h"
+              value={command}
+              placeholder="python script.py"
+              disabled={busy}
+              onChange={(e) => setCommand(e.target.value)}
+            />
+          </label>
+        )}
+
         {error && <div className="text-[13px] text-[#e5484d]">{error}</div>}
 
         <div className="flex gap-2">
           <button
             type="button"
             className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={busy || draft.trim() === ''}
-            onClick={() => run(() => onSet(id, draft.trim()))}
+            disabled={busy || !actionValid}
+            onClick={() => run(() => onSetAction(id, buildAction()))}
           >
-            Set
+            Set action
           </button>
           <button
             type="button"
             className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={busy || path === undefined}
-            onClick={() => run(() => onClear(id).then(() => setDraft('')))}
+            disabled={busy || action === undefined}
+            onClick={() => run(() => onClearAction(id).then(() => setCommand('')))}
           >
-            Clear
+            Clear action
           </button>
           <button
             type="button"
-            className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
+            className="ml-auto cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
             onClick={onClose}
             disabled={busy}
           >
