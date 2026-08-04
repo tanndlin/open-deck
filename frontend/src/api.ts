@@ -45,7 +45,10 @@ export async function clearKeyIcon(id: number): Promise<void> {
   await checkOk(await fetch(`/api/keys/${id}/icon`, { method: 'DELETE' }));
 }
 
-export async function setKeyAction(id: number, action: KeyAction): Promise<void> {
+export async function setKeyAction(
+  id: number,
+  action: KeyAction,
+): Promise<void> {
   await checkOk(
     await fetch(`/api/keys/${id}/action`, {
       method: 'PUT',

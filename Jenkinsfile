@@ -63,7 +63,7 @@ pipeline {
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh '''
                     docker run --rm $DOCKER_VOLS -w $WORKSPACE $RUST_IMAGE \
-                        sh -c "cargo fmt -- --check"
+                        sh -c "rustup component add rustfmt && cargo fmt -- --check"
                     '''
                 }
             }

@@ -32,8 +32,12 @@ export function KeySettings({
   const [error, setError] = useState<string | null>(null);
   const [previewBroken, setPreviewBroken] = useState(false);
 
-  const [actionType, setActionType] = useState<KeyAction['type']>(action?.type ?? 'run_command');
-  const [command, setCommand] = useState(action?.type === 'run_command' ? action.command : '');
+  const [actionType, setActionType] = useState<KeyAction['type']>(
+    action?.type ?? 'run_command',
+  );
+  const [command, setCommand] = useState(
+    action?.type === 'run_command' ? action.command : '',
+  );
 
   useEffect(() => setPreviewBroken(false), [path, version]);
 
@@ -64,7 +68,8 @@ export function KeySettings({
     }
   }
 
-  const actionValid = actionType === 'run_command' ? command.trim() !== '' : false;
+  const actionValid =
+    actionType === 'run_command' ? command.trim() !== '' : false;
 
   return (
     <div
@@ -181,7 +186,9 @@ export function KeySettings({
             type="button"
             className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
             disabled={busy || action === undefined}
-            onClick={() => run(() => onClearAction(id).then(() => setCommand('')))}
+            onClick={() =>
+              run(() => onClearAction(id).then(() => setCommand('')))
+            }
           >
             Clear action
           </button>
