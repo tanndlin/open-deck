@@ -16,27 +16,137 @@ header {
   margin-bottom: 16px;
 }
 
+/* Mirrors the physical Stream Deck: 5 keys per row, keys ordered
+   left-to-right, top-to-bottom to match hardware key indices. */
 .key-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(5, 1fr);
   gap: 12px;
+  max-width: 640px;
 }
 
 .key-tile {
+  position: relative;
+  aspect-ratio: 1 / 1;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 10px;
+  background: var(--code-bg);
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.key-tile:hover {
+  border-color: var(--accent-border);
+}
+
+.key-tile-number {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text-h);
+  opacity: 0.6;
+  z-index: 1;
+}
+
+.key-tile-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.key-tile-empty {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.key-tile-error {
+  color: #e5484d;
+  font-size: 13px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.modal {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 20px;
+  width: min(320px, calc(100vw - 32px));
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 14px;
 }
 
-.key-tile-header {
-  font-weight: 600;
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-header h2 {
+  margin: 0;
+}
+
+.modal-close {
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  background: none;
+  border: none;
   color: var(--text-h);
+  cursor: pointer;
+  padding: 4px;
 }
 
-.key-tile input {
+.modal-preview {
+  aspect-ratio: 1 / 1;
+  width: 140px;
+  margin: 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--code-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.modal-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.modal-preview-empty {
+  font-size: 13px;
+  color: var(--text);
+  padding: 0 12px;
+  text-align: center;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.modal-field input {
   font: inherit;
   font-family: var(--mono);
   font-size: 14px;
@@ -47,12 +157,12 @@ header {
   color: var(--text-h);
 }
 
-.key-tile-actions {
+.modal-actions {
   display: flex;
   gap: 8px;
 }
 
-.key-tile-actions button {
+.modal-actions button {
   font: inherit;
   font-size: 14px;
   padding: 6px 12px;
@@ -63,12 +173,7 @@ header {
   cursor: pointer;
 }
 
-.key-tile-actions button:disabled {
+.modal-actions button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.key-tile-error {
-  color: #e5484d;
-  font-size: 13px;
 }

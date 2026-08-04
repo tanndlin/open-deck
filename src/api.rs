@@ -4,7 +4,8 @@ use std::sync::Arc;
 use axum::{
     Json, Router,
     extract::{Path, State},
-    http::StatusCode,
+    http::{StatusCode, header},
+    response::{IntoResponse, Response},
     routing::get,
 };
 use serde::Deserialize;
@@ -20,6 +21,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/key-count", get(key_count))
         .route("/api/keys", get(list_keys))
         .route("/api/keys/{id}", get(get_key).put(set_key).delete(clear_key))
+        .route("/api/keys/{id}/image", get(get_key_image))
         .with_state(state)
 }
 
@@ -51,6 +53,24 @@ async fn get_key(
         Some(path) => Ok(Json(path.clone())),
         None => Err((StatusCode::NOT_FOUND, format!("no icon set for key {id}"))),
     }
+}
+
+async fn get_key_image(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<u8>,
+) -> Result<Response, ApiError> {
+    let path = {
+        let keys = state.keys.lock().unwrap();
+        keys.get(&id).cloned()
+    };
+    let path = path.ok_or_else(|| (StatusCode::NOT_FOUND, format!("no icon set for key {id}")))?;
+
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, format!("failed to read icon: {e}")))?;
+    let mime = mime_guess::from_path(&path).first_or_octet_stream();
+
+    Ok(([(header::CONTENT_TYPE, mime.as_ref())], bytes).into_response())
 }
 
 #[derive(Deserialize)]

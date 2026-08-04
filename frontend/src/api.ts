@@ -31,3 +31,8 @@ export async function setKey(id: number, path: string): Promise<void> {
 export async function clearKey(id: number): Promise<void> {
   await checkOk(await fetch(`/api/keys/${id}`, { method: 'DELETE' }));
 }
+
+/** URL for the image currently pushed to a key. `version` busts the browser cache after updates. */
+export function keyImageUrl(id: number, version: number): string {
+  return `/api/keys/${id}/image?v=${version}`;
+}

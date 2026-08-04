@@ -1,56 +1,33 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { keyImageUrl } from './api';
 
 interface KeyTileProps {
   id: number;
   path?: string;
-  onSet: (id: number, path: string) => Promise<void>;
-  onClear: (id: number) => Promise<void>;
+  version: number;
+  onClick: (id: number) => void;
 }
 
-export function KeyTile({ id, path, onSet, onClear }: KeyTileProps) {
-  const [draft, setDraft] = useState(path ?? '');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export function KeyTile({ id, path, version, onClick }: KeyTileProps) {
+  const [broken, setBroken] = useState(false);
 
-  async function run(action: () => Promise<void>) {
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  useEffect(() => setBroken(false), [path, version]);
+
+  const showImage = path !== undefined && !broken;
 
   return (
-    <div className="key-tile">
-      <div className="key-tile-header">Key {id}</div>
-      <input
-        type="text"
-        value={draft}
-        placeholder="icons/example.png"
-        disabled={busy}
-        onChange={(e) => setDraft(e.target.value)}
-      />
-      <div className="key-tile-actions">
-        <button
-          type="button"
-          disabled={busy || draft.trim() === ''}
-          onClick={() => run(() => onSet(id, draft.trim()))}
-        >
-          Set
-        </button>
-        <button
-          type="button"
-          disabled={busy || path === undefined}
-          onClick={() => run(() => onClear(id).then(() => setDraft('')))}
-        >
-          Clear
-        </button>
-      </div>
-      {error && <div className="key-tile-error">{error}</div>}
-    </div>
+    <button type="button" className="key-tile" onClick={() => onClick(id)}>
+      <span className="key-tile-number">{id}</span>
+      {showImage ? (
+        <img
+          className="key-tile-image"
+          src={keyImageUrl(id, version)}
+          alt={`Key ${id}`}
+          onError={() => setBroken(true)}
+        />
+      ) : (
+        <span className="key-tile-empty" />
+      )}
+    </button>
   );
 }
