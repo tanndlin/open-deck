@@ -15,7 +15,7 @@ const IMAGE_REPORT_LEN: usize = 1024;
 const IMAGE_REPORT_HEADER_LEN: usize = 8;
 const IMAGE_REPORT_PAYLOAD_LEN: usize = IMAGE_REPORT_LEN - IMAGE_REPORT_HEADER_LEN;
 
-fn encode_key_image(image: DynamicImage) -> anyhow::Result<Vec<u8>> {
+fn encode_key_image(image: &DynamicImage) -> anyhow::Result<Vec<u8>> {
     let image = image.resize_exact(ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3);
     let image = image.fliph().flipv();
 
@@ -23,12 +23,16 @@ fn encode_key_image(image: DynamicImage) -> anyhow::Result<Vec<u8>> {
     let mut rgb = RgbImage::new(ICON_SIZE, ICON_SIZE);
     for (dst, src) in rgb.pixels_mut().zip(rgba.pixels()) {
         let [r, g, b, a] = src.0;
-        let a = a as f32 / 255.0;
-        *dst = Rgb([
-            (r as f32 * a) as u8,
-            (g as f32 * a) as u8,
-            (b as f32 * a) as u8,
-        ]);
+        let alpha = f32::from(a) / 255.0;
+        // r, g, b, alpha are all bounded such that the blended result always
+        // fits in 0..=255.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let blended = [
+            (f32::from(r) * alpha).round() as u8,
+            (f32::from(g) * alpha).round() as u8,
+            (f32::from(b) * alpha).round() as u8,
+        ];
+        *dst = Rgb(blended);
     }
 
     let mut jpeg = Vec::new();
@@ -50,11 +54,14 @@ fn set_key_image(device: &HidDevice, key: u8, jpeg: &[u8]) -> anyhow::Result<()>
         let sent = page * IMAGE_REPORT_PAYLOAD_LEN;
         let is_last = chunk_len == remaining;
 
+        // chunk_len and page are split into wire-protocol low/high bytes;
+        // both stay well within u16 range for any realistic icon size.
+        #[allow(clippy::cast_possible_truncation)]
         let mut packet = vec![
             0x02,
             0x07,
             key,
-            if is_last { 1 } else { 0 },
+            u8::from(is_last),
             (chunk_len & 0xff) as u8,
             (chunk_len >> 8) as u8,
             (page & 0xff) as u8,
@@ -75,7 +82,7 @@ fn set_key_image(device: &HidDevice, key: u8, jpeg: &[u8]) -> anyhow::Result<()>
 /// Clears a key's image (sets it to solid black).
 pub fn clear_key_image(device: &HidDevice, key: u8) -> anyhow::Result<()> {
     let blank = DynamicImage::new_rgb8(ICON_SIZE, ICON_SIZE);
-    let jpeg = encode_key_image(blank)?;
+    let jpeg = encode_key_image(&blank)?;
     set_key_image(device, key, &jpeg)
 }
 
@@ -90,7 +97,7 @@ pub fn clear_all_keys(device: &HidDevice) -> anyhow::Result<()> {
 /// Loads the image at `path` and pushes it to `key`.
 pub fn set_key_icon(device: &HidDevice, key: u8, path: &str) -> anyhow::Result<()> {
     let img = image::open(path)?;
-    let jpeg = encode_key_image(img)?;
+    let jpeg = encode_key_image(&img)?;
     set_key_image(device, key, &jpeg)
 }
 

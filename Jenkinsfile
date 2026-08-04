@@ -3,6 +3,9 @@ pipeline {
 
     environment {
         GITHUB_TOKEN = credentials('GITHUB_TOKEN')
+        DOCKER_VOLS = '-v jenkins_jenkins_home:/var/jenkins_home -v cargo-registry-cache:/usr/local/cargo/registry'
+        NODE_IMAGE = 'node:22'
+        RUST_IMAGE = 'rust:latest'
     }
 
     stages {
@@ -21,11 +24,13 @@ pipeline {
             }
         }
 
-        stage('Install Frontend Deps') {
+        // Builds frontend/dist first: the Rust backend embeds it at compile
+        // time via rust-embed, so every later cargo command needs it present.
+        stage('Install & Build Frontend') {
             steps {
                 sh '''
-                cd frontend
-                npm ci
+                docker run --rm $DOCKER_VOLS -w $WORKSPACE/frontend $NODE_IMAGE \
+                    sh -c "npm ci && npm run build"
                 '''
             }
         }
@@ -34,13 +39,14 @@ pipeline {
             steps {
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh '''
-                    cd frontend
-                    npm run lint
+                    docker run --rm $DOCKER_VOLS -w $WORKSPACE/frontend $NODE_IMAGE \
+                        sh -c "npm run lint"
                     '''
                 }
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh '''
-                    cargo clippy -- -D clippy::pedantic
+                    docker run --rm $DOCKER_VOLS -w $WORKSPACE -e DEBIAN_FRONTEND=noninteractive $RUST_IMAGE \
+                        sh -c "apt-get update -qq && apt-get install -y -qq libudev-dev pkg-config && rustup component add clippy && cargo clippy --all-targets -- -D clippy::pedantic"
                     '''
                 }
             }
@@ -50,13 +56,14 @@ pipeline {
             steps {
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh '''
-                    cd frontend
-                    npm run format:check
+                    docker run --rm $DOCKER_VOLS -w $WORKSPACE/frontend $NODE_IMAGE \
+                        sh -c "npm run format:check"
                     '''
                 }
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh '''
-                    cargo fmt -- --check
+                    docker run --rm $DOCKER_VOLS -w $WORKSPACE $RUST_IMAGE \
+                        sh -c "cargo fmt -- --check"
                     '''
                 }
             }
@@ -65,11 +72,8 @@ pipeline {
         stage('Build') {
             steps {
                 sh '''
-                cd frontend
-                npm run build
-                '''
-                sh '''
-                cargo build --release
+                docker run --rm $DOCKER_VOLS -w $WORKSPACE -e DEBIAN_FRONTEND=noninteractive $RUST_IMAGE \
+                    sh -c "apt-get update -qq && apt-get install -y -qq libudev-dev pkg-config && cargo build --release"
                 '''
             }
         }
@@ -77,7 +81,8 @@ pipeline {
         stage('Test') {
             steps {
                 sh '''
-                cargo test
+                docker run --rm $DOCKER_VOLS -w $WORKSPACE -e DEBIAN_FRONTEND=noninteractive $RUST_IMAGE \
+                    sh -c "apt-get update -qq && apt-get install -y -qq libudev-dev pkg-config && cargo test"
                 '''
             }
         }

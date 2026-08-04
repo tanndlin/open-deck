@@ -44,15 +44,12 @@ async fn main() -> anyhow::Result<()> {
     let device = hid.open(ELGATO_VID, STREAMDECK_MK2_PID)?;
 
     clear_all_keys(&device)?;
-    let keys = match load_key_config(CONFIG_PATH)? {
-        Some(keys) => {
-            load_key_icons(&device, &keys)?;
-            keys
-        }
-        None => {
-            println!("No config at {CONFIG_PATH}, skipping");
-            HashMap::new()
-        }
+    let keys = if let Some(keys) = load_key_config(CONFIG_PATH)? {
+        load_key_icons(&device, &keys)?;
+        keys
+    } else {
+        println!("No config at {CONFIG_PATH}, skipping");
+        HashMap::new()
     };
 
     device.set_blocking_mode(false)?; // non-blocking so we can poll
@@ -105,7 +102,9 @@ fn poll_keys(state: &AppState) {
                     // only fire on the release->press edge, not every report
                     // while the key is held down
                     if is_pressed && !pressed[key_index] {
-                        println!("Key {} pressed", key_index);
+                        println!("Key {key_index} pressed");
+                        // key_index < pressed.len() == KEY_COUNT, checked above.
+                        #[allow(clippy::cast_possible_truncation)]
                         run_key_action(state, key_index as u8);
                     }
                     pressed[key_index] = is_pressed;

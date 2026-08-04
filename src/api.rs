@@ -21,8 +21,18 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/key-count", get(key_count))
         .route("/api/keys", get(list_keys))
         .route("/api/keys/{id}", get(get_key))
-        .route("/api/keys/{id}/icon", get(get_key_icon).put(set_key_icon_route).delete(clear_key_icon))
-        .route("/api/keys/{id}/action", get(get_key_action).put(set_key_action).delete(clear_key_action))
+        .route(
+            "/api/keys/{id}/icon",
+            get(get_key_icon)
+                .put(set_key_icon_route)
+                .delete(clear_key_icon),
+        )
+        .route(
+            "/api/keys/{id}/action",
+            get(get_key_action)
+                .put(set_key_action)
+                .delete(clear_key_action),
+        )
         .route("/api/keys/{id}/image", get(get_key_image))
         .with_state(state)
 }
@@ -45,8 +55,12 @@ fn check_key_range(id: u8) -> Result<(), ApiError> {
 /// action) so the config file doesn't accumulate dead keys.
 fn persist(state: &AppState, keys: &mut KeyConfigMap) -> Result<(), ApiError> {
     keys.retain(|_, c| c.icon.is_some() || c.action.is_some());
-    save_key_config(&state.config_path, keys)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to save config: {e}")))
+    save_key_config(&state.config_path, keys).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to save config: {e}"),
+        )
+    })
 }
 
 async fn list_keys(State(state): State<Arc<AppState>>) -> Json<KeyConfigMap> {
@@ -54,10 +68,7 @@ async fn list_keys(State(state): State<Arc<AppState>>) -> Json<KeyConfigMap> {
     Json(keys.clone())
 }
 
-async fn get_key(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<u8>,
-) -> Json<KeyConfig> {
+async fn get_key(State(state): State<Arc<AppState>>, Path(id): Path<u8>) -> Json<KeyConfig> {
     let keys = state.keys.lock().unwrap();
     Json(keys.get(&id).cloned().unwrap_or_default())
 }
@@ -105,8 +116,12 @@ async fn set_key_icon_route(
 
     {
         let device = state.device.lock().unwrap();
-        set_key_icon(&device, id, &req.path)
-            .map_err(|e| (StatusCode::BAD_REQUEST, format!("failed to set key icon: {e}")))?;
+        set_key_icon(&device, id, &req.path).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("failed to set key icon: {e}"),
+            )
+        })?;
     }
 
     let mut keys = state.keys.lock().unwrap();
@@ -124,8 +139,12 @@ async fn clear_key_icon(
 
     {
         let device = state.device.lock().unwrap();
-        clear_key_image(&device, id)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to clear key: {e}")))?;
+        clear_key_image(&device, id).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to clear key: {e}"),
+            )
+        })?;
     }
 
     let mut keys = state.keys.lock().unwrap();
