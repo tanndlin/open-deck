@@ -7,6 +7,7 @@ use crate::config::load_key_config;
 use crate::push_image::{clear_all_keys, load_key_icons};
 
 mod api;
+mod assets;
 mod config;
 mod push_image;
 
@@ -64,9 +65,11 @@ async fn main() -> anyhow::Result<()> {
     let poll_state = state.clone();
     std::thread::spawn(move || poll_keys(&poll_state));
 
+    let router = api::router(state).fallback(assets::static_handler);
+
     let listener = tokio::net::TcpListener::bind(API_ADDR).await?;
-    println!("REST API listening on http://{API_ADDR}");
-    axum::serve(listener, api::router(state)).await?;
+    println!("Web UI listening on http://{API_ADDR}");
+    axum::serve(listener, router).await?;
 
     Ok(())
 }

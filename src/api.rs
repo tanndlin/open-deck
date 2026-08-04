@@ -17,9 +17,14 @@ type ApiError = (StatusCode, String);
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
+        .route("/api/key-count", get(key_count))
         .route("/api/keys", get(list_keys))
         .route("/api/keys/{id}", get(get_key).put(set_key).delete(clear_key))
         .with_state(state)
+}
+
+async fn key_count() -> Json<u8> {
+    Json(KEY_COUNT)
 }
 
 fn check_key_range(id: u8) -> Result<(), ApiError> {
