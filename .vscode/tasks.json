@@ -20,6 +20,18 @@
       "group": "build"
     },
     {
+      "label": "cargo build (release)",
+      "type": "cargo",
+      "command": "build",
+      "args": [
+        "--release"
+      ],
+      "problemMatcher": [
+        "$rustc"
+      ],
+      "group": "build"
+    },
+    {
       "label": "cargo clippy",
       "type": "cargo",
       "command": "clippy",
@@ -76,6 +88,16 @@
         "kind": "build",
         "isDefault": true
       }
+    },
+    {
+      "label": "build all (release)",
+      "dependsOn": [
+        "frontend: build",
+        "cargo build (release)"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "group": "build"
     }
   ]
 }
