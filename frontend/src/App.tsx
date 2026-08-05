@@ -248,6 +248,7 @@ function App() {
 
           {selectedKey !== null && (
             <KeySettings
+              key={selectedKey}
               id={selectedKey}
               path={path}
               config={keys[selectedKey] ?? { is_folder: false }}
