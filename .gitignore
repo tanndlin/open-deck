@@ -1,5 +1,6 @@
 /target
 /target-watch
 icons/*
+icon-cache/*
 config.json
 .claude
