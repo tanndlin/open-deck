@@ -51,7 +51,7 @@ export function KeyTile({
         />
       ) : showImage ? (
         <img
-          className="block h-full w-full object-cover"
+          className="block h-full w-full object-fill"
           src={keyImageUrl(path, id, version)}
           alt={`Key ${id}`}
           onError={() => setBroken(true)}
