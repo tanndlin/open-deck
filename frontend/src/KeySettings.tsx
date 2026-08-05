@@ -138,7 +138,6 @@ export function KeySettings({
           value={draft}
           placeholder="icons/example.png or https://…"
           disabled={busy}
-          autoFocus
           onChange={(e) => setDraft(e.target.value)}
         />
       </label>

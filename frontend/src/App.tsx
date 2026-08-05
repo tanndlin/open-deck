@@ -11,6 +11,7 @@ import {
   setKeyAction,
   setKeyIcon,
   type KeyAction,
+  type KeyConfig,
   type KeyMap,
   type PagePath,
 } from './api';
@@ -27,6 +28,10 @@ function App() {
   );
   const [version, setVersion] = useState(0);
   const [selectedKey, setSelectedKey] = useState<number | null>(null);
+  const [clipboard, setClipboard] = useState<{
+    id: number;
+    config: KeyConfig;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,6 +99,27 @@ function App() {
     await refresh();
   }
 
+  async function handlePaste(id: number, source: KeyConfig) {
+    setBusy(true);
+    try {
+      if (source.icon !== undefined) {
+        await setKeyIcon(path, id, source.icon);
+      } else {
+        await clearKeyIcon(path, id);
+      }
+      if (source.action !== undefined) {
+        await setKeyAction(path, id, source.action);
+      } else {
+        await clearKeyAction(path, id);
+      }
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleMakeFolder(id: number) {
     await createFolder(path, id);
     await refresh();
@@ -104,6 +130,47 @@ function App() {
     setSelectedKey(null);
     await refresh();
   }
+
+  // Ctrl/Cmd+C copies the selected key's icon + action; Ctrl/Cmd+V pastes
+  // them onto whichever key is currently selected; Delete/Backspace clears
+  // it (or removes the folder, with confirmation). Ignored while typing in
+  // a text field so normal text copy/paste/delete keeps working there.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const isEditable =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable;
+      if (isEditable || selectedKey === null) return;
+
+      const key = e.key.toLowerCase();
+      const config = keys[selectedKey] ?? { is_folder: false };
+
+      if ((e.ctrlKey || e.metaKey) && key === 'c') {
+        setClipboard({ id: selectedKey, config });
+      } else if ((e.ctrlKey || e.metaKey) && key === 'v' && clipboard) {
+        e.preventDefault();
+        handlePaste(selectedKey, clipboard.config);
+      } else if (key === 'delete' || key === 'backspace') {
+        e.preventDefault();
+        if (config.is_folder) {
+          if (
+            window.confirm(
+              'Remove this folder? Everything nested inside it will be deleted permanently.',
+            )
+          ) {
+            handleRemoveFolder(selectedKey);
+          }
+        } else if (config.icon !== undefined || config.action !== undefined) {
+          handlePaste(selectedKey, { is_folder: false });
+        }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey, keys, clipboard, path]);
 
   async function handleOpenFolder(id: number) {
     setSelectedKey(null);
@@ -151,6 +218,13 @@ function App() {
         currentDevicePath={currentDevicePath}
         onNavigate={navigateTo}
       />
+
+      {clipboard && (
+        <p className="-mt-4 text-xs text-text opacity-70">
+          Key {clipboard.id} copied — select another key and press Ctrl+V to
+          paste
+        </p>
+      )}
 
       {keyCount === null ? (
         <p>Loading…</p>
