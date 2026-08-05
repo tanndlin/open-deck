@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   activatePage,
   clearKeyAction,
@@ -8,6 +8,7 @@ import {
   getCurrentPage,
   getKeyCount,
   listKeys,
+  moveKey,
   setKeyAction,
   setKeyIcon,
   type KeyAction,
@@ -15,6 +16,13 @@ import {
   type KeyMap,
   type PagePath,
 } from './api';
+
+function samePagePath(a: PagePath, b: PagePath): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/** How long a key must hover over a folder while being dragged before it opens. */
+const FOLDER_HOVER_OPEN_MS = 1000;
 import { KeySettings } from './KeySettings';
 import { KeyTile } from './KeyTile';
 import { PageBar } from './PageBar';
@@ -34,6 +42,11 @@ function App() {
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dragSource, setDragSource] = useState<{
+    path: PagePath;
+    id: number;
+  } | null>(null);
+  const hoverTimerRef = useRef<number | null>(null);
 
   async function refresh(pathOverride?: PagePath) {
     const activePath = pathOverride ?? path;
@@ -182,6 +195,64 @@ function App() {
     await navigateTo(path.slice(0, -1));
   }
 
+  function clearHoverTimer() {
+    if (hoverTimerRef.current !== null) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  }
+
+  function handleDragStart(id: number) {
+    setDragSource({ path, id });
+  }
+
+  function handleDragEnd() {
+    clearHoverTimer();
+    setDragSource(null);
+  }
+
+  // Dragging a key over a folder and holding it there opens the folder, so
+  // the drag can continue into its subpage without letting go first.
+  function handleHoverFolder(id: number) {
+    clearHoverTimer();
+    hoverTimerRef.current = window.setTimeout(() => {
+      hoverTimerRef.current = null;
+      handleOpenFolder(id);
+    }, FOLDER_HOVER_OPEN_MS);
+  }
+
+  // Dragging a key over the back arrow and holding it there navigates up a
+  // level, same idea as hovering a folder open.
+  function handleHoverBack() {
+    clearHoverTimer();
+    hoverTimerRef.current = window.setTimeout(() => {
+      hoverTimerRef.current = null;
+      handleGoBack();
+    }, FOLDER_HOVER_OPEN_MS);
+  }
+
+  function handleHoverCancel() {
+    clearHoverTimer();
+  }
+
+  async function handleDropKey(id: number) {
+    const source = dragSource;
+    setDragSource(null);
+    clearHoverTimer();
+    if (!source) return;
+    if (samePagePath(source.path, path) && source.id === id) return;
+
+    setBusy(true);
+    try {
+      await moveKey(source.path, source.id, path, id);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleTileClick(id: number) {
     if (selectedKey === id) {
       // Second click on an already-selected key triggers its action.
@@ -231,7 +302,7 @@ function App() {
       ) : (
         <div className="mx-auto flex w-full max-w-[70rem] flex-wrap items-start justify-center gap-6">
           <div
-            className={`grid max-w-160 flex-1 grid-cols-5 gap-3 ${busy ? 'pointer-events-none opacity-50' : ''}`}
+            className={`grid max-w-160 flex-1 grid-cols-5 gap-3 ${busy && !dragSource ? 'pointer-events-none opacity-50' : ''}`}
           >
             {Array.from({ length: keyCount }, (_, id) => (
               <KeyTile
@@ -242,6 +313,12 @@ function App() {
                 version={version}
                 selected={selectedKey === id}
                 onClick={handleTileClick}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                onDropKey={handleDropKey}
+                onHoverFolder={handleHoverFolder}
+                onHoverBack={handleHoverBack}
+                onHoverCancel={handleHoverCancel}
               />
             ))}
           </div>

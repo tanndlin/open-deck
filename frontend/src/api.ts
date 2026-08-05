@@ -22,7 +22,7 @@ export type KeyMap = Record<string, KeyConfig>;
 /** A sequence of key indices followed from the home page. Empty is home. */
 export type PagePath = number[];
 
-function formatPagePath(path: PagePath): string {
+export function formatPagePath(path: PagePath): string {
   return path.length === 0 ? 'home' : path.join('.');
 }
 
@@ -128,6 +128,31 @@ export async function deleteFolder(path: PagePath, id: number): Promise<void> {
   await checkOk(
     await fetch(`/api/pages/${formatPagePath(path)}/keys/${id}/folder`, {
       method: 'DELETE',
+    }),
+  );
+}
+
+/**
+ * Moves a key's whole config (icon, action, folder) to another slot, which
+ * may be on a different page. If the destination slot is occupied, the two
+ * swap.
+ */
+export async function moveKey(
+  fromPath: PagePath,
+  fromId: number,
+  toPath: PagePath,
+  toId: number,
+): Promise<void> {
+  await checkOk(
+    await fetch('/api/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from_path: formatPagePath(fromPath),
+        from_id: fromId,
+        to_path: formatPagePath(toPath),
+        to_id: toId,
+      }),
     }),
   );
 }

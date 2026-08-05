@@ -40,6 +40,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/api/pages/{path}/keys/{id}/folder",
             put(create_folder).delete(delete_folder),
         )
+        .route("/api/move", post(move_key))
         .route("/api/pages/{path}/keys/{id}/image", get(get_key_image))
         .with_state(state)
 }
@@ -432,6 +433,80 @@ async fn delete_folder(
         if let Err(e) = result {
             eprintln!("Failed to switch back after deleting the active folder: {e}");
         }
+    }
+
+    Ok(StatusCode::OK)
+}
+
+#[derive(Deserialize)]
+struct MoveKeyRequest {
+    from_path: String,
+    from_id: u8,
+    to_path: String,
+    to_id: u8,
+}
+
+/// Moves (or, if the destination slot is occupied, swaps) a key's whole
+/// config — icon, action, and folder — to another slot, which may be on a
+/// different page. Used by the web UI's drag-and-drop.
+async fn move_key(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<MoveKeyRequest>,
+) -> Result<StatusCode, ApiError> {
+    check_key_range(req.from_id)?;
+    check_key_range(req.to_id)?;
+    let from_path = parse_page_path(&req.from_path)?;
+    let to_path = parse_page_path(&req.to_path)?;
+
+    // A folder can't be moved into its own (possibly deeply) nested page —
+    // that would disconnect it from the tree reachable from the root.
+    if to_path.len() > from_path.len()
+        && to_path[..from_path.len()] == from_path[..]
+        && to_path[from_path.len()] == req.from_id
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "cannot move a folder into itself".into(),
+        ));
+    }
+
+    {
+        let mut root = state.root.lock().unwrap();
+
+        let moved = {
+            let from_page =
+                page_at_mut(&mut root, &from_path).ok_or_else(|| page_not_found(&req.from_path))?;
+            from_page.remove(&req.from_id)
+        };
+
+        let displaced = {
+            let to_page =
+                page_at_mut(&mut root, &to_path).ok_or_else(|| page_not_found(&req.to_path))?;
+            let displaced = to_page.remove(&req.to_id);
+            if let Some(cfg) = moved {
+                to_page.insert(req.to_id, cfg);
+            }
+            displaced
+        };
+
+        if let Some(cfg) = displaced {
+            // Guaranteed to exist: we just looked it up above, and the lock
+            // on `root` has been held continuously since.
+            let from_page = page_at_mut(&mut root, &from_path).unwrap();
+            from_page.insert(req.from_id, cfg);
+        }
+    }
+
+    persist(&state)?;
+
+    let current = state.current_path.lock().unwrap().clone();
+    if current == from_path || current == to_path {
+        // See activate_page: icons can be URLs, so this may block on
+        // network I/O — keep it off the async runtime.
+        let result = tokio::task::spawn_blocking(move || switch_to_path(&state, &current))
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
+        result.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
     }
 
     Ok(StatusCode::OK)
