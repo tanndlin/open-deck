@@ -1,4 +1,9 @@
 import { useEffect, useState } from 'react';
+import { HotkeyField } from './action-fields/HotkeyField';
+import { OpenFolderField } from './action-fields/OpenFolderField';
+import { OpenUrlField } from './action-fields/OpenUrlField';
+import { RunCommandField } from './action-fields/RunCommandField';
+import { TypeTextField } from './action-fields/TypeTextField';
 import {
   ACTION_TYPES,
   keyImageUrl,
@@ -21,14 +26,6 @@ interface KeySettingsProps {
   onMakeFolder: (id: number) => Promise<void>;
   onRemoveFolder: (id: number) => Promise<void>;
   onOpenFolder: (id: number) => void;
-}
-
-/** Splits a `+`-joined hotkey string (e.g. "ctrl+alt+del") into key names. */
-function parseHotkeyKeys(input: string): string[] {
-  return input
-    .split('+')
-    .map((k) => k.trim())
-    .filter((k) => k !== '');
 }
 
 export function KeySettings({
@@ -54,19 +51,9 @@ export function KeySettings({
   const [actionType, setActionType] = useState<ActionType>(
     action?.type ?? 'run_command',
   );
-  const [command, setCommand] = useState(
-    action?.type === 'run_command' ? action.command : '',
-  );
-  const [url, setUrl] = useState(action?.type === 'open_url' ? action.url : '');
-  const [folderPath, setFolderPath] = useState(
-    action?.type === 'open_folder' ? action.path : '',
-  );
-  const [typeTextValue, setTypeTextValue] = useState(
-    action?.type === 'type_text' ? action.text : '',
-  );
-  const [hotkeyInput, setHotkeyInput] = useState(
-    action?.type === 'hotkey' ? action.keys.join('+') : '',
-  );
+  // Bumped after clearing the action to force the currently selected
+  // ActionTypeField to remount and reset its own (now-owned) input state.
+  const [clearNonce, setClearNonce] = useState(0);
 
   useEffect(() => setPreviewBroken(false), [icon, version]);
 
@@ -89,32 +76,6 @@ export function KeySettings({
       setBusy(false);
     }
   }
-
-  function buildAction(): KeyAction {
-    switch (actionType) {
-      case 'run_command':
-        return { type: 'run_command', command: command.trim() };
-      case 'open_url':
-        return { type: 'open_url', url: url.trim() };
-      case 'open_folder':
-        return { type: 'open_folder', path: folderPath.trim() };
-      case 'type_text':
-        return { type: 'type_text', text: typeTextValue };
-      case 'hotkey':
-        return { type: 'hotkey', keys: parseHotkeyKeys(hotkeyInput) };
-    }
-  }
-
-  const actionValid =
-    actionType === 'run_command'
-      ? command.trim() !== ''
-      : actionType === 'open_url'
-        ? url.trim() !== ''
-        : actionType === 'open_folder'
-          ? folderPath.trim() !== ''
-          : actionType === 'type_text'
-            ? typeTextValue !== ''
-            : parseHotkeyKeys(hotkeyInput).length > 0;
 
   function handleRemoveFolder() {
     if (
@@ -237,134 +198,26 @@ export function KeySettings({
             </select>
           </label>
 
-          {actionType === 'run_command' && (
-            <label className="flex flex-col gap-1.5 text-[13px] text-text">
-              Command
-              <input
-                type="text"
-                className="rounded-sm border border-border bg-bg px-2 py-1.5 font-mono text-sm text-text-h"
-                value={command}
-                placeholder="python script.py"
-                disabled={busy}
-                onChange={(e) => setCommand(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && actionValid) {
-                    e.preventDefault();
-                    run(() => onSetAction(id, buildAction()));
-                  }
-                }}
-              />
-            </label>
-          )}
+          <ActionTypeField
+            key={clearNonce}
+            actionType={actionType}
+            action={action}
+            disabled={busy}
+            onSubmit={(builtAction) => run(() => onSetAction(id, builtAction))}
+          />
 
-          {actionType === 'open_url' && (
-            <label className="flex flex-col gap-1.5 text-[13px] text-text">
-              URL
-              <input
-                type="text"
-                className="rounded-sm border border-border bg-bg px-2 py-1.5 font-mono text-sm text-text-h"
-                value={url}
-                placeholder="https://example.com"
-                disabled={busy}
-                onChange={(e) => setUrl(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && actionValid) {
-                    e.preventDefault();
-                    run(() => onSetAction(id, buildAction()));
-                  }
-                }}
-              />
-            </label>
-          )}
-
-          {actionType === 'open_folder' && (
-            <label className="flex flex-col gap-1.5 text-[13px] text-text">
-              Folder path
-              <input
-                type="text"
-                className="rounded-sm border border-border bg-bg px-2 py-1.5 font-mono text-sm text-text-h"
-                value={folderPath}
-                placeholder="C:\Users\me\Documents"
-                disabled={busy}
-                onChange={(e) => setFolderPath(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && actionValid) {
-                    e.preventDefault();
-                    run(() => onSetAction(id, buildAction()));
-                  }
-                }}
-              />
-            </label>
-          )}
-
-          {actionType === 'type_text' && (
-            <label className="flex flex-col gap-1.5 text-[13px] text-text">
-              Text to type
-              <input
-                type="text"
-                className="rounded-sm border border-border bg-bg px-2 py-1.5 font-mono text-sm text-text-h"
-                value={typeTextValue}
-                placeholder="Hello, world!"
-                disabled={busy}
-                onChange={(e) => setTypeTextValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && actionValid) {
-                    e.preventDefault();
-                    run(() => onSetAction(id, buildAction()));
-                  }
-                }}
-              />
-            </label>
-          )}
-
-          {actionType === 'hotkey' && (
-            <label className="flex flex-col gap-1.5 text-[13px] text-text">
-              Keys (joined with +)
-              <input
-                type="text"
-                className="rounded-sm border border-border bg-bg px-2 py-1.5 font-mono text-sm text-text-h"
-                value={hotkeyInput}
-                placeholder="ctrl+c, escape, del"
-                disabled={busy}
-                onChange={(e) => setHotkeyInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && actionValid) {
-                    e.preventDefault();
-                    run(() => onSetAction(id, buildAction()));
-                  }
-                }}
-              />
-            </label>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={busy || !actionValid}
-              onClick={() => run(() => onSetAction(id, buildAction()))}
-            >
-              Set action
-            </button>
-            <button
-              type="button"
-              className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={busy || action === undefined}
-              onClick={() =>
-                run(() =>
-                  onClearAction(id).then(() => {
-                    setCommand('');
-                    setUrl('');
-                    setFolderPath('');
-                    setTypeTextValue('');
-                    setHotkeyInput('');
-                  }),
-                )
-              }
-            >
-              Clear action
-            </button>
-          </div>
+          <button
+            type="button"
+            className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={busy || action === undefined}
+            onClick={() =>
+              run(() =>
+                onClearAction(id).then(() => setClearNonce((n) => n + 1)),
+              )
+            }
+          >
+            Clear action
+          </button>
 
           <button
             type="button"
@@ -389,4 +242,53 @@ export function KeySettings({
       </button>
     </div>
   );
+}
+
+interface ActionTypeFieldProps {
+  actionType: ActionType;
+  action: KeyAction | undefined;
+  disabled: boolean;
+  onSubmit: (action: KeyAction) => void;
+}
+
+function ActionTypeField({
+  actionType,
+  action,
+  disabled,
+  onSubmit,
+}: ActionTypeFieldProps) {
+  switch (actionType) {
+    case 'run_command':
+      return (
+        <RunCommandField
+          action={action}
+          disabled={disabled}
+          onSubmit={onSubmit}
+        />
+      );
+    case 'open_url':
+      return (
+        <OpenUrlField action={action} disabled={disabled} onSubmit={onSubmit} />
+      );
+    case 'open_folder':
+      return (
+        <OpenFolderField
+          action={action}
+          disabled={disabled}
+          onSubmit={onSubmit}
+        />
+      );
+    case 'type_text':
+      return (
+        <TypeTextField
+          action={action}
+          disabled={disabled}
+          onSubmit={onSubmit}
+        />
+      );
+    case 'hotkey':
+      return (
+        <HotkeyField action={action} disabled={disabled} onSubmit={onSubmit} />
+      );
+  }
 }

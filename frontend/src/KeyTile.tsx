@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import backArrowIcon from './assets/back_arrow.png';
 import { keyImageUrl, type KeyConfig, type PagePath } from './api';
+import backArrowIcon from './assets/back_arrow.png';
 
 interface KeyTileProps {
   id: number;
@@ -25,7 +25,6 @@ function isImageFile(file: File): boolean {
   return file.type.startsWith('image/') || IMAGE_FILE_NAME_RE.test(file.name);
 }
 
-/** Every key — folder or not, on every page — renders through this exact same tile. */
 export function KeyTile({
   id,
   path,
