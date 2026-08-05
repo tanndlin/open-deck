@@ -3,6 +3,7 @@ import {
   activatePage,
   clearKeyAction,
   clearKeyIcon,
+  clearKeyTitle,
   createFolder,
   deleteFolder,
   getCurrentPage,
@@ -11,6 +12,7 @@ import {
   moveKey,
   setKeyAction,
   setKeyIcon,
+  setKeyTitle,
   uploadKeyIcon,
 } from './api';
 import type { KeyAction, KeyConfig, KeyMap, PagePath } from './types';
@@ -98,6 +100,16 @@ function App() {
     await refresh();
   }
 
+  async function handleSetTitle(id: number, title: string) {
+    await setKeyTitle(path, id, title);
+    await refresh();
+  }
+
+  async function handleClearTitle(id: number) {
+    await clearKeyTitle(path, id);
+    await refresh();
+  }
+
   async function handleSetAction(id: number, action: KeyAction) {
     await setKeyAction(path, id, action);
     await refresh();
@@ -115,6 +127,11 @@ function App() {
         await setKeyIcon(path, id, source.icon);
       } else {
         await clearKeyIcon(path, id);
+      }
+      if (source.title !== undefined) {
+        await setKeyTitle(path, id, source.title);
+      } else {
+        await clearKeyTitle(path, id);
       }
       if (source.action !== undefined) {
         await setKeyAction(path, id, source.action);
@@ -169,7 +186,11 @@ function App() {
           ) {
             handleRemoveFolder(selectedKey);
           }
-        } else if (config.icon !== undefined || config.action !== undefined) {
+        } else if (
+          config.icon !== undefined ||
+          config.title !== undefined ||
+          config.action !== undefined
+        ) {
           handlePaste(selectedKey, { is_folder: false });
         }
       }
@@ -337,6 +358,8 @@ function App() {
               onClose={() => setSelectedKey(null)}
               onSetIcon={handleSetIcon}
               onClearIcon={handleClearIcon}
+              onSetTitle={handleSetTitle}
+              onClearTitle={handleClearTitle}
               onSetAction={handleSetAction}
               onClearAction={handleClearAction}
               onMakeFolder={handleMakeFolder}

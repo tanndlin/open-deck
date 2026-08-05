@@ -1,5 +1,8 @@
+use std::sync::OnceLock;
+
 use hidapi::HidDevice;
-use image::{ColorType, DynamicImage, Rgb, RgbImage, codecs::jpeg::JpegEncoder};
+use image::{ColorType, DynamicImage, Rgb, RgbImage, Rgba, codecs::jpeg::JpegEncoder};
+use imageproc::rect::Rect;
 
 use crate::KEY_COUNT;
 use crate::config::KeyConfigMap;
@@ -27,13 +30,87 @@ const IMAGE_REPORT_LEN: usize = 1024;
 const IMAGE_REPORT_HEADER_LEN: usize = 8;
 const IMAGE_REPORT_PAYLOAD_LEN: usize = IMAGE_REPORT_LEN - IMAGE_REPORT_HEADER_LEN;
 
-fn encode_key_image(image: &DynamicImage) -> anyhow::Result<Vec<u8>> {
+const TITLE_BAR_HEIGHT: u32 = 18;
+const TITLE_FONT_SIZE: f32 = 13.0;
+
+#[cfg(target_os = "windows")]
+const CANDIDATE_FONT_PATHS: &[&str] = &[
+    "C:\\Windows\\Fonts\\segoeui.ttf",
+    "C:\\Windows\\Fonts\\arial.ttf",
+];
+
+#[cfg(target_os = "macos")]
+const CANDIDATE_FONT_PATHS: &[&str] = &["/System/Library/Fonts/Supplemental/Arial.ttf"];
+
+#[cfg(all(unix, not(target_os = "macos")))]
+const CANDIDATE_FONT_PATHS: &[&str] = &[
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+];
+
+/// Best-effort lookup of a usable system font for rendering key titles on the
+/// physical device. Titles are simply skipped there (though they still show
+/// in the web UI, which renders them itself) if none of this OS's well-known
+/// font paths exist.
+fn system_font_bytes() -> Option<&'static [u8]> {
+    static BYTES: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+    BYTES
+        .get_or_init(|| {
+            CANDIDATE_FONT_PATHS
+                .iter()
+                .find_map(|p| std::fs::read(p).ok())
+        })
+        .as_deref()
+}
+
+/// Overlays `title` in a semi-transparent bar along the bottom of `canvas` so
+/// it stays legible over any icon underneath.
+fn draw_title(canvas: &mut image::RgbaImage, title: &str) {
+    let Some(font_bytes) = system_font_bytes() else {
+        return;
+    };
+    let Ok(font) = ab_glyph::FontRef::try_from_slice(font_bytes) else {
+        return;
+    };
+    let scale = ab_glyph::PxScale::from(TITLE_FONT_SIZE);
+
+    let bar_height = TITLE_BAR_HEIGHT.min(ICON_SIZE);
+    // bar_y fits in i32: ICON_SIZE is a small fixed constant (72).
+    #[allow(clippy::cast_possible_wrap)]
+    let bar_y = (ICON_SIZE - bar_height) as i32;
+    imageproc::drawing::draw_filled_rect_mut(
+        canvas,
+        Rect::at(0, bar_y).of_size(ICON_SIZE, bar_height),
+        Rgba([0, 0, 0, 170]),
+    );
+
+    let (text_width, _) = imageproc::drawing::text_size(scale, &font, title);
+    let x = ((i64::from(ICON_SIZE) - i64::from(text_width)) / 2).max(0);
+    // x fits in i32: it's clamped to >= 0 and bounded above by ICON_SIZE.
+    #[allow(clippy::cast_possible_truncation)]
+    let x = x as i32;
+    imageproc::drawing::draw_text_mut(
+        canvas,
+        Rgba([255, 255, 255, 255]),
+        x,
+        bar_y + 2,
+        scale,
+        &font,
+        title,
+    );
+}
+
+fn encode_key_image(image: &DynamicImage, title: Option<&str>) -> anyhow::Result<Vec<u8>> {
     // Fit (not stretch) into the key's bounds, then center on a padded square canvas.
     let fitted = image.resize(ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3);
     let mut canvas = image::RgbaImage::new(ICON_SIZE, ICON_SIZE);
     let x_offset = i64::from((ICON_SIZE - fitted.width()) / 2);
     let y_offset = i64::from((ICON_SIZE - fitted.height()) / 2);
     image::imageops::overlay(&mut canvas, &fitted.to_rgba8(), x_offset, y_offset);
+
+    if let Some(title) = title.map(str::trim).filter(|t| !t.is_empty()) {
+        draw_title(&mut canvas, title);
+    }
 
     let image = DynamicImage::ImageRgba8(canvas).fliph().flipv();
 
@@ -97,17 +174,33 @@ fn set_key_image(device: &HidDevice, key: u8, jpeg: &[u8]) -> anyhow::Result<()>
     Ok(())
 }
 
-/// Clears a key's image (sets it to solid black).
-pub fn clear_key_image(device: &HidDevice, key: u8, cache: &IconCache) -> anyhow::Result<()> {
-    let jpeg = cache.get_image(BLANK_CACHE_KEY, || {
-        encode_key_image(&DynamicImage::new_rgb8(ICON_SIZE, ICON_SIZE))
+/// Composes a cache key that also varies with `title`, so a title change
+/// busts the cache even when the underlying icon (identified by `base`)
+/// doesn't. NUL-separated so it can't collide with a real `base`.
+fn with_title_suffix<'a>(base: &'a str, title: Option<&str>) -> std::borrow::Cow<'a, str> {
+    match title.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => std::borrow::Cow::Owned(format!("{base}\0title\0{t}")),
+        None => std::borrow::Cow::Borrowed(base),
+    }
+}
+
+/// Clears a key's image (sets it to solid black), still showing `title` if set.
+pub fn clear_key_image(
+    device: &HidDevice,
+    key: u8,
+    title: Option<&str>,
+    cache: &IconCache,
+) -> anyhow::Result<()> {
+    let cache_key = with_title_suffix(BLANK_CACHE_KEY, title);
+    let jpeg = cache.get_image(&cache_key, || {
+        encode_key_image(&DynamicImage::new_rgb8(ICON_SIZE, ICON_SIZE), title)
     })?;
     set_key_image(device, key, &jpeg)
 }
 
 pub fn clear_all_keys(device: &HidDevice, cache: &IconCache) -> anyhow::Result<()> {
     for key in 0..KEY_COUNT {
-        clear_key_image(device, key, cache)?;
+        clear_key_image(device, key, None, cache)?;
     }
     Ok(())
 }
@@ -116,35 +209,44 @@ pub fn clear_all_keys(device: &HidDevice, cache: &IconCache) -> anyhow::Result<(
 /// (if any) is configured there.
 pub fn set_back_arrow_icon(device: &HidDevice, key: u8, cache: &IconCache) -> anyhow::Result<()> {
     let jpeg = cache.get_image(BACK_ARROW_CACHE_KEY, || {
-        encode_key_image(&image::load_from_memory(BACK_ARROW_BYTES)?)
+        encode_key_image(&image::load_from_memory(BACK_ARROW_BYTES)?, None)
     })?;
     set_key_image(device, key, &jpeg)
 }
 
-/// Pushes the default folder icon onto `key`.
-pub fn set_folder_icon(device: &HidDevice, key: u8, cache: &IconCache) -> anyhow::Result<()> {
-    let jpeg = cache.get_image(FOLDER_ICON_CACHE_KEY, || {
-        encode_key_image(&image::load_from_memory(FOLDER_ICON_BYTES)?)
+/// Pushes the default folder icon onto `key`, still showing `title` if set.
+pub fn set_folder_icon(
+    device: &HidDevice,
+    key: u8,
+    title: Option<&str>,
+    cache: &IconCache,
+) -> anyhow::Result<()> {
+    let cache_key = with_title_suffix(FOLDER_ICON_CACHE_KEY, title);
+    let jpeg = cache.get_image(&cache_key, || {
+        encode_key_image(&image::load_from_memory(FOLDER_ICON_BYTES)?, title)
     })?;
     set_key_image(device, key, &jpeg)
 }
 
-/// Loads the image at `path` (a local path or `http(s)` URL) and pushes it to `key`.
-/// The encoded result is cached under `path`, so this only happens once per icon.
+/// Loads the image at `path` (a local path or `http(s)` URL) and pushes it to
+/// `key`, overlaying `title` if set. The encoded result is cached under
+/// `path` (and `title`), so this only happens once per combination.
 pub fn set_key_icon(
     device: &HidDevice,
     key: u8,
     path: &str,
+    title: Option<&str>,
     cache: &IconCache,
 ) -> anyhow::Result<()> {
-    let jpeg = cache.get_image(path, || {
+    let cache_key = with_title_suffix(path, title);
+    let jpeg = cache.get_image(&cache_key, || {
         let image = if path.starts_with("http://") || path.starts_with("https://") {
             let icon = cache.get_or_fetch(path).map_err(|e| anyhow::anyhow!(e))?;
             image::load_from_memory(&icon.bytes)?
         } else {
             image::open(path)?
         };
-        encode_key_image(&image)
+        encode_key_image(&image, title)
     })?;
     set_key_image(device, key, &jpeg)
 }
@@ -159,14 +261,16 @@ pub fn load_key_icons(device: &HidDevice, keys: &KeyConfigMap, cache: &IconCache
             continue;
         }
 
+        let title = config.title.as_deref();
         let result = match &config.icon {
             Some(path) => {
                 #[cfg(debug_assertions)]
                 println!("Set key {key} image from {path}");
 
-                set_key_icon(device, key, path, cache)
+                set_key_icon(device, key, path, title, cache)
             }
-            None if config.folder.is_some() => set_folder_icon(device, key, cache),
+            None if config.folder.is_some() => set_folder_icon(device, key, title, cache),
+            None if title.is_some() => clear_key_image(device, key, title, cache),
             None => Ok(()),
         };
 
@@ -188,7 +292,7 @@ mod tests {
         // should shrink it down to 72x18 and pad above/below, not stretch it
         // to fill the whole square.
         let wide = DynamicImage::ImageRgba8(RgbaImage::from_pixel(200, 50, Rgba([255, 0, 0, 255])));
-        let jpeg = encode_key_image(&wide).unwrap();
+        let jpeg = encode_key_image(&wide, None).unwrap();
         let decoded = image::load_from_memory(&jpeg).unwrap().into_rgb8();
 
         // Corners fall in the padded area, so they should stay black rather

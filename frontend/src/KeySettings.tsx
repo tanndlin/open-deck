@@ -21,6 +21,8 @@ interface KeySettingsProps {
   onClose: () => void;
   onSetIcon: (id: number, path: string) => Promise<void>;
   onClearIcon: (id: number) => Promise<void>;
+  onSetTitle: (id: number, title: string) => Promise<void>;
+  onClearTitle: (id: number) => Promise<void>;
   onSetAction: (id: number, action: KeyAction) => Promise<void>;
   onClearAction: (id: number) => Promise<void>;
   onMakeFolder: (id: number) => Promise<void>;
@@ -36,14 +38,17 @@ export function KeySettings({
   onClose,
   onSetIcon,
   onClearIcon,
+  onSetTitle,
+  onClearTitle,
   onSetAction,
   onClearAction,
   onMakeFolder,
   onRemoveFolder,
   onOpenFolder,
 }: KeySettingsProps) {
-  const { icon, action, is_folder: isFolder } = config;
+  const { icon, title, action, is_folder: isFolder } = config;
   const [draft, setDraft] = useState(icon ?? '');
+  const [titleDraft, setTitleDraft] = useState(title ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewBroken, setPreviewBroken] = useState(false);
@@ -151,6 +156,45 @@ export function KeySettings({
           onClick={() => run(() => onClearIcon(id).then(() => setDraft('')))}
         >
           Clear icon
+        </button>
+      </div>
+
+      <label className="flex flex-col gap-1.5 text-[13px] text-text">
+        Title
+        <input
+          type="text"
+          className="rounded-sm border border-border bg-bg px-2 py-1.5 text-sm text-text-h"
+          value={titleDraft}
+          placeholder="Shown on the key"
+          disabled={busy}
+          onChange={(e) => setTitleDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && titleDraft.trim() !== '') {
+              e.preventDefault();
+              run(() => onSetTitle(id, titleDraft.trim()));
+            }
+          }}
+        />
+      </label>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={busy || titleDraft.trim() === ''}
+          onClick={() => run(() => onSetTitle(id, titleDraft.trim()))}
+        >
+          Set title
+        </button>
+        <button
+          type="button"
+          className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={busy || title === undefined}
+          onClick={() =>
+            run(() => onClearTitle(id).then(() => setTitleDraft('')))
+          }
+        >
+          Clear title
         </button>
       </div>
 

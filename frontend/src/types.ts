@@ -32,6 +32,7 @@ export const ACTION_TYPES = Object.entries(ACTION_LABELS).map(
 
 export interface KeyConfig {
   icon?: string;
+  title?: string;
   action?: KeyAction;
   is_folder: boolean;
 }

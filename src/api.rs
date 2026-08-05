@@ -14,7 +14,7 @@ use crate::action::Action;
 use crate::config::{KeyConfig, KeyConfigMap, page_at, page_at_mut, save_key_config};
 use crate::icon_cache::IconCache;
 use crate::infer_icon::infer_icon;
-use crate::push_image::{FOLDER_ICON_BYTES, clear_key_image, set_key_icon};
+use crate::push_image::{FOLDER_ICON_BYTES, clear_key_image, set_folder_icon, set_key_icon};
 use crate::{AppState, KEY_COUNT, switch_to_path};
 
 type ApiError = (StatusCode, String);
@@ -39,6 +39,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/api/pages/{path}/keys/{id}/icon/upload",
             put(upload_key_icon).layer(DefaultBodyLimit::max(UPLOAD_ICON_MAX_BYTES)),
+        )
+        .route(
+            "/api/pages/{path}/keys/{id}/title",
+            put(set_key_title).delete(clear_key_title),
         )
         .route(
             "/api/pages/{path}/keys/{id}/action",
@@ -119,7 +123,9 @@ fn prune_empty_keys(page: &mut KeyConfigMap) {
             prune_empty_keys(folder);
         }
     }
-    page.retain(|_, c| c.icon.is_some() || c.action.is_some() || c.folder.is_some());
+    page.retain(|_, c| {
+        c.icon.is_some() || c.title.is_some() || c.action.is_some() || c.folder.is_some()
+    });
 }
 
 #[derive(Serialize)]
@@ -154,6 +160,8 @@ struct KeyConfigView {
     #[serde(skip_serializing_if = "Option::is_none")]
     icon: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     action: Option<Action>,
     is_folder: bool,
 }
@@ -162,6 +170,7 @@ impl From<&KeyConfig> for KeyConfigView {
     fn from(config: &KeyConfig) -> Self {
         Self {
             icon: config.icon.clone(),
+            title: config.title.clone(),
             action: config.action.clone(),
             is_folder: config.folder.is_some(),
         }
@@ -266,12 +275,25 @@ async fn apply_icon(
     // Only push to the device if the edited page is the one currently shown
     // — otherwise it's picked up next time it's activated.
     if path == state.current_path.lock().unwrap().as_slice() {
+        let title = {
+            let root = state.root.lock().unwrap();
+            page_at(&root, path)
+                .and_then(|p| p.get(&id))
+                .and_then(|c| c.title.clone())
+        };
+
         // May block on network I/O (see activate_page).
         let icon_state = Arc::clone(state);
         let icon_path = icon.clone();
         tokio::task::spawn_blocking(move || {
             let device = icon_state.device.lock().unwrap();
-            set_key_icon(&device, id, &icon_path, &icon_state.icon_cache)
+            set_key_icon(
+                &device,
+                id,
+                &icon_path,
+                title.as_deref(),
+                &icon_state.icon_cache,
+            )
         })
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?
@@ -357,8 +379,14 @@ async fn clear_key_icon(
     let path = parse_page_path(&raw_path)?;
 
     if path == *state.current_path.lock().unwrap() {
+        let title = {
+            let root = state.root.lock().unwrap();
+            page_at(&root, &path)
+                .and_then(|p| p.get(&id))
+                .and_then(|c| c.title.clone())
+        };
         let device = state.device.lock().unwrap();
-        clear_key_image(&device, id, &state.icon_cache).map_err(|e| {
+        clear_key_image(&device, id, title.as_deref(), &state.icon_cache).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("failed to clear key: {e}"),
@@ -374,6 +402,88 @@ async fn clear_key_icon(
     drop(root);
 
     persist(&state)?;
+    Ok(StatusCode::OK)
+}
+
+#[derive(Deserialize)]
+struct SetTitleRequest {
+    title: String,
+}
+
+/// Re-renders and pushes the key's image with an updated title (if the
+/// edited page is currently shown) and persists it. Mirrors `apply_icon`.
+async fn apply_title(
+    state: &Arc<AppState>,
+    path: &[u8],
+    id: u8,
+    title: Option<String>,
+) -> Result<(), ApiError> {
+    if path == state.current_path.lock().unwrap().as_slice() {
+        let (icon, is_folder) = {
+            let root = state.root.lock().unwrap();
+            let config = page_at(&root, path).and_then(|p| p.get(&id));
+            (
+                config.and_then(|c| c.icon.clone()),
+                config.is_some_and(|c| c.folder.is_some()),
+            )
+        };
+
+        // May block on network I/O (see activate_page).
+        let push_state = Arc::clone(state);
+        let push_title = title.clone();
+        tokio::task::spawn_blocking(move || {
+            let device = push_state.device.lock().unwrap();
+            match &icon {
+                Some(icon_path) => set_key_icon(
+                    &device,
+                    id,
+                    icon_path,
+                    push_title.as_deref(),
+                    &push_state.icon_cache,
+                ),
+                None if is_folder => {
+                    set_folder_icon(&device, id, push_title.as_deref(), &push_state.icon_cache)
+                }
+                None => clear_key_image(&device, id, push_title.as_deref(), &push_state.icon_cache),
+            }
+        })
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to set key title: {e}"),
+            )
+        })?;
+    }
+
+    let mut root = state.root.lock().unwrap();
+    let page =
+        page_at_mut(&mut root, path).ok_or_else(|| page_not_found(&format_page_path(path)))?;
+    page.entry(id).or_default().title = title;
+    drop(root);
+
+    persist(state)
+}
+
+async fn set_key_title(
+    State(state): State<Arc<AppState>>,
+    Path((raw_path, id)): Path<(String, u8)>,
+    Json(req): Json<SetTitleRequest>,
+) -> Result<StatusCode, ApiError> {
+    check_key_range(id)?;
+    let path = parse_page_path(&raw_path)?;
+    apply_title(&state, &path, id, Some(req.title)).await?;
+    Ok(StatusCode::OK)
+}
+
+async fn clear_key_title(
+    State(state): State<Arc<AppState>>,
+    Path((raw_path, id)): Path<(String, u8)>,
+) -> Result<StatusCode, ApiError> {
+    check_key_range(id)?;
+    let path = parse_page_path(&raw_path)?;
+    apply_title(&state, &path, id, None).await?;
     Ok(StatusCode::OK)
 }
 

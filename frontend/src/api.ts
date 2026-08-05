@@ -87,6 +87,28 @@ export async function clearKeyIcon(path: PagePath, id: number): Promise<void> {
   );
 }
 
+export async function setKeyTitle(
+  path: PagePath,
+  id: number,
+  title: string,
+): Promise<void> {
+  await checkOk(
+    await fetch(`/api/pages/${formatPagePath(path)}/keys/${id}/title`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    }),
+  );
+}
+
+export async function clearKeyTitle(path: PagePath, id: number): Promise<void> {
+  await checkOk(
+    await fetch(`/api/pages/${formatPagePath(path)}/keys/${id}/title`, {
+      method: 'DELETE',
+    }),
+  );
+}
+
 export async function setKeyAction(
   path: PagePath,
   id: number,

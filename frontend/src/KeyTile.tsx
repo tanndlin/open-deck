@@ -114,6 +114,11 @@ export function KeyTile({
       ) : (
         <span className="pointer-events-none block h-full w-full" />
       )}
+      {!isBackKey && config.title && (
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-0.5 text-[10px] text-white">
+          {config.title}
+        </span>
+      )}
     </button>
   );
 }
