@@ -48,9 +48,12 @@ fn shell_command(command: &str) -> std::process::Command {
 
 #[cfg(target_os = "windows")]
 fn open_url_command(url: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+
+    // Quoted manually so cmd doesn't parse `|`/`&` in the URL as operators; `""` is `start`'s window-title arg.
+    let escaped_url = url.replace('"', "%22");
     let mut c = std::process::Command::new("cmd");
-    // The empty string is the window title argument `start` expects before the URL.
-    c.args(["/C", "start", "", url]);
+    c.raw_arg(format!("/C start \"\" \"{escaped_url}\""));
     c
 }
 
