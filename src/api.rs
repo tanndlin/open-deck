@@ -436,7 +436,13 @@ async fn set_key_action(
     // already saved.
     if !has_icon {
         let cache_dir = std::path::Path::new(&state.config_path).with_file_name("icon-cache");
-        if let Some(icon) = infer_icon(&action, &cache_dir)
+        // Inferring a webpage's favicon fetches it over the network, so
+        // (like the icon URLs handled elsewhere in this file) keep it off
+        // the async runtime.
+        let inferred = tokio::task::spawn_blocking(move || infer_icon(&action, &cache_dir))
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
+        if let Some(icon) = inferred
             && let Err((_, e)) = apply_icon(&state, &path, id, icon).await
         {
             eprintln!("Failed to set inferred icon for key {id}: {e}");
