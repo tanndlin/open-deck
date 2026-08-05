@@ -153,27 +153,31 @@ pub fn set_key_icon(
 /// Loads the icon for each configured key and pushes it to the device.
 /// Folder keys with no icon of their own fall back to the default folder
 /// icon; other keys with no icon (or no entry at all) are left as-is.
-pub fn load_key_icons(
-    device: &HidDevice,
-    keys: &KeyConfigMap,
-    cache: &IconCache,
-) -> anyhow::Result<()> {
+///
+/// A single key's icon failing to load (a missing file, a flaky favicon
+/// fetch, ...) is logged and skipped rather than aborting the whole page —
+/// the caller relies on every other key still getting rendered so the
+/// screen doesn't end up stuck showing a mix of two pages.
+pub fn load_key_icons(device: &HidDevice, keys: &KeyConfigMap, cache: &IconCache) {
     for (&key, config) in keys {
         if key >= KEY_COUNT {
             eprintln!("Skipping key {key}: out of range (device has {KEY_COUNT} keys)");
             continue;
         }
 
-        match &config.icon {
+        let result = match &config.icon {
             Some(path) => {
-                set_key_icon(device, key, path, cache)?;
-
                 #[cfg(debug_assertions)]
                 println!("Set key {key} image from {path}");
+
+                set_key_icon(device, key, path, cache)
             }
-            None if config.folder.is_some() => set_folder_icon(device, key, cache)?,
-            None => {}
+            None if config.folder.is_some() => set_folder_icon(device, key, cache),
+            None => Ok(()),
+        };
+
+        if let Err(e) = result {
+            eprintln!("Failed to set icon for key {key}: {e}");
         }
     }
-    Ok(())
 }

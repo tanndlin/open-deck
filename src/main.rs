@@ -47,18 +47,21 @@ pub(crate) fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()
         anyhow::bail!("no page at path {path:?}");
     };
 
+    // Key presses are routed by `current_path`, so it must switch before any
+    // device I/O below — otherwise a mid-render failure (e.g. a flaky
+    // favicon fetch) leaves the screen showing (part of) the new page while
+    // presses still resolve against the old one.
+    *state.current_path.lock().unwrap() = path.to_vec();
+
     let device = state.device.lock().unwrap();
     clear_all_keys(&device, &state.icon_cache)?;
-    load_key_icons(&device, page, &state.icon_cache)?;
+    load_key_icons(&device, page, &state.icon_cache);
     // Every non-home page reserves this key to go up a level, regardless of
     // whatever's configured for it — matches KeyTile.tsx's isBackKey.
     if !path.is_empty() {
         set_back_arrow_icon(&device, BACK_KEY, &state.icon_cache)?;
     }
-    drop(root);
-    drop(device);
 
-    *state.current_path.lock().unwrap() = path.to_vec();
     Ok(())
 }
 
@@ -88,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
         println!("No config at {CONFIG_PATH}, skipping");
         KeyConfigMap::new()
     };
-    load_key_icons(&device, &root, &icon_cache)?;
+    load_key_icons(&device, &root, &icon_cache);
 
     device.set_blocking_mode(false)?; // non-blocking so we can poll
 
