@@ -73,7 +73,10 @@ pipeline {
             steps {
                 sh '''
                 docker run --rm $DOCKER_VOLS -w $WORKSPACE -e DEBIAN_FRONTEND=noninteractive $RUST_IMAGE \
-                    sh -c "apt-get update -qq && apt-get install -y -qq libudev-dev pkg-config && cargo build --release"
+                    sh -c "apt-get update -qq && apt-get install -y -qq libudev-dev pkg-config gcc-mingw-w64-x86-64 && \
+                        rustup target add x86_64-pc-windows-gnu && \
+                        cargo build --release && \
+                        cargo build --release --target x86_64-pc-windows-gnu"
                 '''
             }
         }
@@ -83,6 +86,19 @@ pipeline {
                 sh '''
                 docker run --rm $DOCKER_VOLS -w $WORKSPACE -e DEBIAN_FRONTEND=noninteractive $RUST_IMAGE \
                     sh -c "apt-get update -qq && apt-get install -y -qq libudev-dev pkg-config && cargo test"
+                '''
+            }
+        }
+
+        // Rolls the "latest" GitHub release forward to this commit's binary,
+        // giving a stable download URL that always points at the newest build.
+        stage('Publish Latest Release') {
+            steps {
+                sh '''
+                docker run --rm $DOCKER_VOLS -w $WORKSPACE \
+                    -e GITHUB_TOKEN=$GITHUB_TOKEN -e GIT_COMMIT=$GIT_COMMIT \
+                    alpine:3.20 \
+                    sh -c "apk add --no-cache curl jq >/dev/null && sh scripts/publish-latest-release.sh"
                 '''
             }
         }
