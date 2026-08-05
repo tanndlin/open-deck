@@ -36,7 +36,7 @@
         {
           "name": "Backend Server",
           "commands": [
-            "cargo watch -w src -x check -x run"
+            "$env:CARGO_TARGET_DIR='target-watch'; cargo watch -w src -x check -x run"
           ]
         }
       ],
