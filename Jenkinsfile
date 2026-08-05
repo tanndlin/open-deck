@@ -93,6 +93,9 @@ pipeline {
         // Rolls the "latest" GitHub release forward to this commit's binary,
         // giving a stable download URL that always points at the newest build.
         stage('Publish Latest Release') {
+            when {
+                branch 'master'
+            }
             steps {
                 sh '''
                 docker run --rm $DOCKER_VOLS -w $WORKSPACE \
