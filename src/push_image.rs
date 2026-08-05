@@ -3,6 +3,7 @@ use image::{ColorType, DynamicImage, Rgb, RgbImage, codecs::jpeg::JpegEncoder};
 
 use crate::KEY_COUNT;
 use crate::config::KeyConfigMap;
+use crate::icon_cache::IconCache;
 
 // MK.2 key images are 72x72 JPEGs, mirrored on both axes to match how the
 // panel is physically mounted behind each button.
@@ -95,12 +96,12 @@ pub fn clear_all_keys(device: &HidDevice) -> anyhow::Result<()> {
 }
 
 /// Loads an image from a local file path or, if `source` is an `http(s)`
-/// URL, downloads it — so icons can point at a link instead of requiring the
-/// image to be saved to disk first.
-pub fn load_image(source: &str) -> anyhow::Result<DynamicImage> {
+/// URL, downloads it (via `cache`) — so icons can point at a link instead of
+/// requiring the image to be saved to disk first.
+pub fn load_image(source: &str, cache: &IconCache) -> anyhow::Result<DynamicImage> {
     if source.starts_with("http://") || source.starts_with("https://") {
-        let bytes = ureq::get(source).call()?.body_mut().read_to_vec()?;
-        Ok(image::load_from_memory(&bytes)?)
+        let icon = cache.get_or_fetch(source).map_err(|e| anyhow::anyhow!(e))?;
+        Ok(image::load_from_memory(&icon.bytes)?)
     } else {
         Ok(image::open(source)?)
     }
@@ -108,15 +109,24 @@ pub fn load_image(source: &str) -> anyhow::Result<DynamicImage> {
 
 /// Loads the image at `path` (a local path or `http(s)` URL) and pushes it
 /// to `key`.
-pub fn set_key_icon(device: &HidDevice, key: u8, path: &str) -> anyhow::Result<()> {
-    let img = load_image(path)?;
+pub fn set_key_icon(
+    device: &HidDevice,
+    key: u8,
+    path: &str,
+    cache: &IconCache,
+) -> anyhow::Result<()> {
+    let img = load_image(path, cache)?;
     let jpeg = encode_key_image(&img)?;
     set_key_image(device, key, &jpeg)
 }
 
 /// Loads the icon for each configured key and pushes it to the device. Keys
 /// with no icon (or no entry at all) are left as-is.
-pub fn load_key_icons(device: &HidDevice, keys: &KeyConfigMap) -> anyhow::Result<()> {
+pub fn load_key_icons(
+    device: &HidDevice,
+    keys: &KeyConfigMap,
+    cache: &IconCache,
+) -> anyhow::Result<()> {
     for (&key, config) in keys {
         let Some(path) = &config.icon else { continue };
 
@@ -125,7 +135,7 @@ pub fn load_key_icons(device: &HidDevice, keys: &KeyConfigMap) -> anyhow::Result
             continue;
         }
 
-        set_key_icon(device, key, path)?;
+        set_key_icon(device, key, path, cache)?;
 
         #[cfg(debug_assertions)]
         println!("Set key {key} image from {path}");

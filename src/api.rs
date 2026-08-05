@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::Action;
 use crate::config::{KeyConfig, KeyConfigMap, page_at, page_at_mut, save_key_config};
+use crate::icon_cache::IconCache;
 use crate::push_image::{clear_key_image, set_key_icon};
 use crate::{AppState, KEY_COUNT, switch_to_path};
 
@@ -132,7 +133,13 @@ async fn activate_page(
     Path(raw_path): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let path = parse_page_path(&raw_path)?;
-    switch_to_path(&state, &path).map_err(|_| page_not_found(&raw_path))?;
+    // Icons can be http(s) URLs, so this may block on network I/O — run it
+    // off the async runtime to avoid stalling other requests waiting on the
+    // same state locks.
+    let result = tokio::task::spawn_blocking(move || switch_to_path(&state, &path))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
+    result.map_err(|_| page_not_found(&raw_path))?;
     Ok(StatusCode::OK)
 }
 
@@ -206,9 +213,11 @@ async fn get_key_image(
     let icon = icon.ok_or_else(|| (StatusCode::NOT_FOUND, format!("no icon set for key {id}")))?;
 
     if icon.starts_with("http://") || icon.starts_with("https://") {
-        let (bytes, mime) = tokio::task::spawn_blocking(move || fetch_remote_icon(&icon))
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))??;
+        let cache_state = Arc::clone(&state);
+        let (bytes, mime) =
+            tokio::task::spawn_blocking(move || fetch_remote_icon(&cache_state.icon_cache, &icon))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))??;
         return Ok(([(header::CONTENT_TYPE, mime)], bytes).into_response());
     }
 
@@ -220,30 +229,14 @@ async fn get_key_image(
     Ok(([(header::CONTENT_TYPE, mime.as_ref())], bytes).into_response())
 }
 
-/// Downloads a remote icon and returns its bytes with a best-effort content
-/// type: the server's own `Content-Type` if it sent one, otherwise a guess
-/// from the URL's extension.
-fn fetch_remote_icon(url: &str) -> Result<(Vec<u8>, String), ApiError> {
-    let mut response = ureq::get(url).call().map_err(|e| {
-        (
-            StatusCode::BAD_GATEWAY,
-            format!("failed to fetch icon: {e}"),
-        )
-    })?;
-    let mime = response.body_mut().mime_type().map_or_else(
-        || {
-            mime_guess::from_path(url)
-                .first_or_octet_stream()
-                .to_string()
-        },
-        str::to_owned,
-    );
-    let bytes = response
-        .body_mut()
-        .read_to_vec()
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("failed to read icon: {e}")))?;
-
-    Ok((bytes, mime))
+/// Downloads (or reuses a cached copy of) a remote icon and returns its
+/// bytes with a best-effort content type: the server's own `Content-Type` if
+/// it sent one, otherwise a guess from the URL's extension.
+fn fetch_remote_icon(cache: &IconCache, url: &str) -> Result<(Vec<u8>, String), ApiError> {
+    let icon = cache
+        .get_or_fetch(url)
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
+    Ok((icon.bytes.clone(), icon.mime.clone()))
 }
 
 #[derive(Deserialize)]
@@ -263,8 +256,17 @@ async fn set_key_icon_route(
     // currently shown — otherwise it'll be picked up next time it's
     // activated.
     if path == *state.current_path.lock().unwrap() {
-        let device = state.device.lock().unwrap();
-        set_key_icon(&device, id, &req.path).map_err(|e| {
+        // The icon may be an http(s) URL, so this can block on network
+        // I/O — keep it off the async runtime (see activate_page).
+        let icon_state = Arc::clone(&state);
+        let icon_path = req.path.clone();
+        tokio::task::spawn_blocking(move || {
+            let device = icon_state.device.lock().unwrap();
+            set_key_icon(&device, id, &icon_path, &icon_state.icon_cache)
+        })
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?
+        .map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
                 format!("failed to set key icon: {e}"),
@@ -396,10 +398,11 @@ async fn delete_folder(
     check_key_range(id)?;
     let path = parse_page_path(&raw_path)?;
 
-    let mut root = state.root.lock().unwrap();
-    let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
-    let removed = page.get_mut(&id).is_some_and(|c| c.folder.take().is_some());
-    drop(root);
+    let removed = {
+        let mut root = state.root.lock().unwrap();
+        let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+        page.get_mut(&id).is_some_and(|c| c.folder.take().is_some())
+    };
 
     if !removed {
         return Err((StatusCode::NOT_FOUND, format!("key {id} is not a folder")));
@@ -411,8 +414,15 @@ async fn delete_folder(
 
     persist(&state)?;
 
-    if device_was_inside && let Err(e) = switch_to_path(&state, &path) {
-        eprintln!("Failed to switch back after deleting the active folder: {e}");
+    if device_was_inside {
+        // See activate_page: icons can be URLs, so this may block on
+        // network I/O — keep it off the async runtime.
+        let result = tokio::task::spawn_blocking(move || switch_to_path(&state, &path))
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
+        if let Err(e) = result {
+            eprintln!("Failed to switch back after deleting the active folder: {e}");
+        }
     }
 
     Ok(StatusCode::OK)

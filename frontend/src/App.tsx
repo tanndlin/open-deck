@@ -56,17 +56,22 @@ function App() {
 
   async function navigateTo(newPath: PagePath) {
     setSelectedKey(null);
+    // The on-screen page only reflects the persisted config, so it doesn't
+    // need to wait on the physical device below — that push is a JPEG
+    // encode + USB write per key, and can take a noticeable moment.
+    await refresh(newPath);
+
     setBusy(true);
     try {
       // Best-effort: if this fails, the "device is showing a different
       // page" mismatch in PageBar will surface it.
       await activatePage(newPath);
+      setCurrentDevicePath(newPath);
     } catch {
       // ignored — see above
     } finally {
       setBusy(false);
     }
-    await refresh(newPath);
   }
 
   async function handleSetIcon(id: number, iconPath: string) {

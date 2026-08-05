@@ -3,12 +3,14 @@ use std::sync::{Arc, Mutex};
 use hidapi::{HidApi, HidDevice};
 
 use crate::config::{KeyConfigMap, load_key_config, page_at};
+use crate::icon_cache::IconCache;
 use crate::push_image::{clear_all_keys, load_key_icons};
 
 mod action;
 mod api;
 mod assets;
 mod config;
+mod icon_cache;
 mod push_image;
 
 const ELGATO_VID: u16 = 0x0fd9;
@@ -32,6 +34,7 @@ struct AppState {
     /// the physical device.
     current_path: Mutex<Vec<u8>>,
     config_path: String,
+    icon_cache: IconCache,
 }
 
 /// Clears the device and pushes the page at `path` onto it, then marks it
@@ -45,7 +48,7 @@ pub(crate) fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()
 
     let device = state.device.lock().unwrap();
     clear_all_keys(&device)?;
-    load_key_icons(&device, page)?;
+    load_key_icons(&device, page, &state.icon_cache)?;
     drop(root);
     drop(device);
 
@@ -78,7 +81,8 @@ async fn main() -> anyhow::Result<()> {
         println!("No config at {CONFIG_PATH}, skipping");
         KeyConfigMap::new()
     };
-    load_key_icons(&device, &root)?;
+    let icon_cache = IconCache::new();
+    load_key_icons(&device, &root, &icon_cache)?;
 
     device.set_blocking_mode(false)?; // non-blocking so we can poll
 
@@ -87,6 +91,7 @@ async fn main() -> anyhow::Result<()> {
         root: Mutex::new(root),
         current_path: Mutex::new(Vec::new()),
         config_path: CONFIG_PATH.to_string(),
+        icon_cache,
     });
 
     let poll_state = state.clone();
