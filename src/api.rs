@@ -69,8 +69,7 @@ fn check_key_range(id: u8) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Parses a `.`-joined sequence of key indices (e.g. `"3.1"`), or the
-/// literal `"home"` for the empty path.
+/// Parses a `.`-joined sequence of key indices (e.g. `"3.1"`), or `"home"` for the empty path.
 fn parse_page_path(raw: &str) -> Result<Vec<u8>, ApiError> {
     if raw == "home" {
         return Ok(Vec::new());
@@ -102,9 +101,7 @@ fn page_not_found(raw_path: &str) -> ApiError {
     )
 }
 
-/// Persists the whole page tree, dropping any key entries that are now
-/// completely empty (no icon, action, or folder) so the config file doesn't
-/// accumulate dead keys.
+/// Persists the page tree, dropping now-empty key entries so the config file doesn't accumulate dead keys.
 fn persist(state: &AppState) -> Result<(), ApiError> {
     let mut root = state.root.lock().unwrap();
     prune_empty_keys(&mut root);
@@ -137,16 +134,13 @@ async fn current_page(State(state): State<Arc<AppState>>) -> Json<CurrentPageRes
     })
 }
 
-/// Pushes the page at `path` onto the physical device without waiting for a
-/// key press — lets the web UI preview a page.
+/// Pushes the page at `path` onto the device immediately, so the web UI can preview it.
 async fn activate_page(
     State(state): State<Arc<AppState>>,
     Path(raw_path): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let path = parse_page_path(&raw_path)?;
-    // Icons can be http(s) URLs, so this may block on network I/O — run it
-    // off the async runtime to avoid stalling other requests waiting on the
-    // same state locks.
+    // Icons can be http(s) URLs, so keep this off the async runtime.
     let result = tokio::task::spawn_blocking(move || switch_to_path(&state, &path))
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
@@ -154,8 +148,7 @@ async fn activate_page(
     Ok(StatusCode::OK)
 }
 
-/// A key's config as sent to the frontend: `folder` is collapsed to a flag
-/// rather than sending the (potentially large) nested page.
+/// A key's config as sent to the frontend: `folder` is collapsed to a flag rather than the nested page.
 #[derive(Serialize)]
 struct KeyConfigView {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -249,9 +242,7 @@ async fn get_key_image(
     Ok(([(header::CONTENT_TYPE, mime.as_ref())], bytes).into_response())
 }
 
-/// Downloads (or reuses a cached copy of) a remote icon and returns its
-/// bytes with a best-effort content type: the server's own `Content-Type` if
-/// it sent one, otherwise a guess from the URL's extension.
+/// Downloads (or reuses a cached copy of) a remote icon, with a best-effort content type.
 fn fetch_remote_icon(cache: &IconCache, url: &str) -> Result<(Vec<u8>, String), ApiError> {
     let icon = cache
         .get_or_fetch(url)
@@ -264,21 +255,18 @@ struct SetIconRequest {
     path: String,
 }
 
-/// Pushes `icon` to the device (if `path` is the one currently shown) and
-/// persists it as key `id`'s icon. Shared by the icon-setting route and the
-/// favicon auto-fill in [`set_key_action`].
+/// Pushes `icon` to the device and persists it as key `id`'s icon. Shared by the
+/// icon-setting route and the favicon auto-fill in [`set_key_action`].
 async fn apply_icon(
     state: &Arc<AppState>,
     path: &[u8],
     id: u8,
     icon: String,
 ) -> Result<(), ApiError> {
-    // Only push to the physical device if the edited page is the one
-    // currently shown — otherwise it'll be picked up next time it's
-    // activated.
+    // Only push to the device if the edited page is the one currently shown
+    // — otherwise it's picked up next time it's activated.
     if path == state.current_path.lock().unwrap().as_slice() {
-        // The icon may be an http(s) URL, so this can block on network
-        // I/O — keep it off the async runtime (see activate_page).
+        // May block on network I/O (see activate_page).
         let icon_state = Arc::clone(state);
         let icon_path = icon.clone();
         tokio::task::spawn_blocking(move || {
@@ -317,16 +305,12 @@ async fn set_key_icon_route(
 
 #[derive(Deserialize)]
 struct UploadIconQuery {
-    /// The original filename from the browser's `File`, used only to recover
-    /// its extension (so the saved copy keeps a correct content type).
+    /// Used only to recover the extension for a correct content type.
     filename: String,
 }
 
-/// Saves a dropped/uploaded icon image under `<config dir>/icons/`, named by
-/// a hash of its contents (so re-uploading the same image reuses the same
-/// file), and sets it as key `id`'s icon. Used by the web UI's
-/// drag-a-file-from-the-desktop icon picker — browsers don't expose a
-/// dragged file's real filesystem path, so the bytes have to be copied in.
+/// Saves an uploaded icon under `<config dir>/icons/`, named by a content hash
+/// (so re-uploads reuse the same file), and sets it as key `id`'s icon.
 async fn upload_key_icon(
     State(state): State<Arc<AppState>>,
     Path((raw_path, id)): Path<(String, u8)>,
@@ -430,15 +414,10 @@ async fn set_key_action(
 
     persist(&state)?;
 
-    // Best-effort: a key with no icon of its own gets one inferred from its
-    // new action (the target webpage's favicon, or the target program's own
-    // icon). Failure here shouldn't fail the request — the action is
-    // already saved.
+    // Best-effort: infer an icon for a key that doesn't have one yet.
+    // Failure here shouldn't fail the request — the action is already saved.
     if !has_icon {
         let cache_dir = std::path::Path::new(&state.config_path).with_file_name("icon-cache");
-        // Inferring a webpage's favicon fetches it over the network, so
-        // (like the icon URLs handled elsewhere in this file) keep it off
-        // the async runtime.
         let inferred = tokio::task::spawn_blocking(move || infer_icon(&action, &cache_dir))
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
@@ -470,9 +449,7 @@ async fn clear_key_action(
     Ok(StatusCode::OK)
 }
 
-/// Turns key `id` on `path` into a folder, giving it an (initially empty)
-/// nested page. Idempotent — does nothing if it's already a folder, so an
-/// existing nested page is never wiped out.
+/// Idempotent — does nothing if `id` is already a folder, so an existing nested page survives.
 async fn create_folder(
     State(state): State<Arc<AppState>>,
     Path((raw_path, id)): Path<(String, u8)>,
@@ -493,8 +470,7 @@ async fn create_folder(
     Ok(StatusCode::CREATED)
 }
 
-/// Removes key `id`'s folder, deleting everything nested inside it — the
-/// folder's page is only ever reachable through this key.
+/// Deletes everything nested inside key `id`'s folder along with it.
 async fn delete_folder(
     State(state): State<Arc<AppState>>,
     Path((raw_path, id)): Path<(String, u8)>,
@@ -519,8 +495,7 @@ async fn delete_folder(
     persist(&state)?;
 
     if device_was_inside {
-        // See activate_page: icons can be URLs, so this may block on
-        // network I/O — keep it off the async runtime.
+        // May block on network I/O (see activate_page).
         let result = tokio::task::spawn_blocking(move || switch_to_path(&state, &path))
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
@@ -540,9 +515,7 @@ struct MoveKeyRequest {
     to_id: u8,
 }
 
-/// Moves (or, if the destination slot is occupied, swaps) a key's whole
-/// config — icon, action, and folder — to another slot, which may be on a
-/// different page. Used by the web UI's drag-and-drop.
+/// Moves a key's config to another slot (possibly on a different page); swaps if occupied.
 async fn move_key(
     State(state): State<Arc<AppState>>,
     Json(req): Json<MoveKeyRequest>,
@@ -552,8 +525,8 @@ async fn move_key(
     let from_path = parse_page_path(&req.from_path)?;
     let to_path = parse_page_path(&req.to_path)?;
 
-    // A folder can't be moved into its own (possibly deeply) nested page —
-    // that would disconnect it from the tree reachable from the root.
+    // A folder can't be moved into its own nested page — that would
+    // disconnect it from the tree reachable from the root.
     if to_path.len() > from_path.len()
         && to_path[..from_path.len()] == from_path[..]
         && to_path[from_path.len()] == req.from_id
@@ -595,8 +568,7 @@ async fn move_key(
 
     let current = state.current_path.lock().unwrap().clone();
     if current == from_path || current == to_path {
-        // See activate_page: icons can be URLs, so this may block on
-        // network I/O — keep it off the async runtime.
+        // May block on network I/O (see activate_page).
         let result = tokio::task::spawn_blocking(move || switch_to_path(&state, &current))
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;

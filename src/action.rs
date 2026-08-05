@@ -1,18 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 /// Something that can be bound to a key and run when it's pressed.
-///
-/// Tagged on `type` so new variants can be added without breaking existing
-/// config files, and the frontend can switch on the same tag to render the
-/// right editor for each action.
+/// Tagged on `type` so the frontend can switch on it to render the right editor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
-    /// Runs `command` through the platform shell, e.g. `python script.py`.
     RunCommand { command: String },
-    /// Opens `url` in the system's default browser.
     OpenUrl { url: String },
-    /// Opens `path` in the system's file manager.
     OpenFolder { path: String },
 }
 

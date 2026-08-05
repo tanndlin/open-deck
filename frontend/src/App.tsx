@@ -75,15 +75,13 @@ function App() {
 
   async function navigateTo(newPath: PagePath) {
     setSelectedKey(null);
-    // The on-screen page only reflects the persisted config, so it doesn't
-    // need to wait on the physical device below — that push is a JPEG
-    // encode + USB write per key, and can take a noticeable moment.
+    // Doesn't need to wait on the device push below (a JPEG encode + USB
+    // write per key), since the on-screen page only reflects the config.
     await refresh(newPath);
 
     setBusy(true);
     try {
-      // Best-effort: if this fails, the "device is showing a different
-      // page" mismatch in PageBar will surface it.
+      // Best-effort: failures surface via PageBar's device-mismatch notice.
       await activatePage(newPath);
       setCurrentDevicePath(newPath);
     } catch {
@@ -145,10 +143,8 @@ function App() {
     await refresh();
   }
 
-  // Ctrl/Cmd+C copies the selected key's icon + action; Ctrl/Cmd+V pastes
-  // them onto whichever key is currently selected; Delete/Backspace clears
-  // it (or removes the folder, with confirmation). Ignored while typing in
-  // a text field so normal text copy/paste/delete keeps working there.
+  // Ctrl/Cmd+C/V copy/paste a key's icon+action; Delete/Backspace clears it.
+  // Ignored while typing in a text field.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
@@ -212,8 +208,8 @@ function App() {
     setDragSource(null);
   }
 
-  // Dragging a key over a folder and holding it there opens the folder, so
-  // the drag can continue into its subpage without letting go first.
+  // Holding a dragged key over a folder opens it, so the drag can continue
+  // into the subpage without letting go first.
   function handleHoverFolder(id: number) {
     clearHoverTimer();
     hoverTimerRef.current = window.setTimeout(() => {
@@ -222,8 +218,7 @@ function App() {
     }, FOLDER_HOVER_OPEN_MS);
   }
 
-  // Dragging a key over the back arrow and holding it there navigates up a
-  // level, same idea as hovering a folder open.
+  // Same idea as handleHoverFolder, but navigates up a level.
   function handleHoverBack() {
     clearHoverTimer();
     hoverTimerRef.current = window.setTimeout(() => {
@@ -268,10 +263,8 @@ function App() {
 
   function handleTileClick(id: number) {
     if (selectedKey === id) {
-      // Second click on an already-selected key triggers its action.
-      // Key 0 on a subpage is reserved to go up a level, regardless of
-      // whatever's configured there. Otherwise, for now, only folders do
-      // anything here.
+      // Second click triggers the key's action. Key 0 on a subpage always
+      // goes back; otherwise only folders do anything here.
       if (id === 0 && path.length > 0) {
         handleGoBack();
         return;

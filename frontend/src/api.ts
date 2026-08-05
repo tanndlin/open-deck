@@ -86,11 +86,7 @@ export async function setKeyIcon(
   );
 }
 
-/**
- * Uploads a dropped image file's bytes and sets it as key `id`'s icon.
- * Browsers don't expose a dragged file's real filesystem path, so the file
- * is copied to the server instead of being referenced by path.
- */
+/** Uploads a dropped file's bytes as key `id`'s icon (browsers don't expose a dragged file's real path). */
 export async function uploadKeyIcon(
   path: PagePath,
   id: number,
@@ -143,7 +139,6 @@ export async function clearKeyAction(
   );
 }
 
-/** Turns key `id` on `path` into a folder with its own (initially empty) subpage. */
 export async function createFolder(path: PagePath, id: number): Promise<void> {
   await checkOk(
     await fetch(`/api/pages/${formatPagePath(path)}/keys/${id}/folder`, {
@@ -152,7 +147,7 @@ export async function createFolder(path: PagePath, id: number): Promise<void> {
   );
 }
 
-/** Removes key `id`'s folder, deleting everything nested inside it. */
+/** Deletes everything nested inside key `id`'s folder along with it. */
 export async function deleteFolder(path: PagePath, id: number): Promise<void> {
   await checkOk(
     await fetch(`/api/pages/${formatPagePath(path)}/keys/${id}/folder`, {
@@ -161,11 +156,7 @@ export async function deleteFolder(path: PagePath, id: number): Promise<void> {
   );
 }
 
-/**
- * Moves a key's whole config (icon, action, folder) to another slot, which
- * may be on a different page. If the destination slot is occupied, the two
- * swap.
- */
+/** Moves a key's config to another slot (possibly on a different page); swaps if the destination is occupied. */
 export async function moveKey(
   fromPath: PagePath,
   fromId: number,

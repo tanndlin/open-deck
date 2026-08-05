@@ -20,27 +20,21 @@ const KEY_COUNT: u8 = 15;
 const CONFIG_PATH: &str = "config.json";
 const API_ADDR: &str = "127.0.0.1:3000";
 
-/// The top-left key. On every non-home page, pressing it goes back up one
-/// level instead of running whatever's configured there — but it's still a
-/// perfectly normal key otherwise (icon, action, folder all editable).
+/// On every non-home page, pressing this goes back up a level instead of running its configured action.
 const BACK_KEY: u8 = 0;
 
 /// State shared between the HID polling loop and the REST API.
 struct AppState {
     device: Mutex<HidDevice>,
-    /// The home page, with every subpage nested inside its keys' `folder`
-    /// fields.
+    /// The home page; subpages nest inside their keys' `folder` fields.
     root: Mutex<KeyConfigMap>,
-    /// The path (sequence of key indices from home) currently pushed onto
-    /// the physical device.
+    /// Key indices from home to the page currently pushed onto the device.
     current_path: Mutex<Vec<u8>>,
     config_path: String,
     icon_cache: IconCache,
 }
 
-/// Clears the device and pushes the page at `path` onto it, then marks it
-/// as the active page. Used both when a folder key or back key is pressed
-/// and when the web UI asks to preview a page on the device.
+/// Clears the device and pushes the page at `path` onto it, then marks it as active.
 pub(crate) fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()> {
     let root = state.root.lock().unwrap();
     let Some(page) = page_at(&root, path) else {
@@ -48,16 +42,14 @@ pub(crate) fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()
     };
 
     // Key presses are routed by `current_path`, so it must switch before any
-    // device I/O below — otherwise a mid-render failure (e.g. a flaky
-    // favicon fetch) leaves the screen showing (part of) the new page while
-    // presses still resolve against the old one.
+    // device I/O below — otherwise a mid-render failure leaves the screen
+    // showing the new page while presses still resolve against the old one.
     *state.current_path.lock().unwrap() = path.to_vec();
 
     let device = state.device.lock().unwrap();
     clear_all_keys(&device, &state.icon_cache)?;
     load_key_icons(&device, page, &state.icon_cache);
-    // Every non-home page reserves this key to go up a level, regardless of
-    // whatever's configured for it — matches KeyTile.tsx's isBackKey.
+    // Matches KeyTile.tsx's isBackKey.
     if !path.is_empty() {
         set_back_arrow_icon(&device, BACK_KEY, &state.icon_cache)?;
     }
@@ -69,7 +61,6 @@ pub(crate) fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()
 async fn main() -> anyhow::Result<()> {
     let hid = HidApi::new()?;
 
-    // Find all connected Elgato devices
     #[cfg(debug_assertions)]
     for dev in hid.device_list() {
         if dev.vendor_id() == ELGATO_VID {
@@ -93,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
     };
     load_key_icons(&device, &root, &icon_cache);
 
-    device.set_blocking_mode(false)?; // non-blocking so we can poll
+    device.set_blocking_mode(false)?;
 
     let state = Arc::new(AppState {
         device: Mutex::new(device),
@@ -161,8 +152,6 @@ fn poll_keys(state: &AppState) {
 fn run_key_action(state: &AppState, key: u8) {
     let current_path = state.current_path.lock().unwrap().clone();
 
-    // BACK_KEY is reserved for "go up a page" on every page except home, so
-    // it's never looked up in that page's own configured key.
     if key == BACK_KEY && !current_path.is_empty() {
         let parent_path = &current_path[..current_path.len() - 1];
         if let Err(e) = switch_to_path(state, parent_path) {

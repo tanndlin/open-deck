@@ -2,15 +2,8 @@ use std::path::Path;
 
 use crate::action::Action;
 
-/// Best-effort guess at an icon for a key whose action was just set but that
-/// has no icon of its own yet:
-/// - `OpenUrl` uses the target site's favicon.
-/// - `RunCommand` uses the target program's own icon (Windows only).
-///
-/// Returns a path or URL the existing icon pipeline already knows how to
-/// load (see `push_image::set_key_icon` / `api::get_key_image`), or `None`
-/// if nothing could be inferred — callers should treat that as "leave the
-/// key without an icon" rather than an error.
+/// Best-effort: `OpenUrl` uses the site's favicon, `RunCommand` uses the
+/// program's own icon (Windows only). `None` means leave the key without one.
 pub fn infer_icon(action: &Action, cache_dir: &Path) -> Option<String> {
     match action {
         Action::OpenUrl { url } => favicon_url(url),
@@ -19,12 +12,8 @@ pub fn infer_icon(action: &Action, cache_dir: &Path) -> Option<String> {
     }
 }
 
-/// Recovers from a failed fetch of `url` when it looks like a guessed
-/// `/favicon.ico` path (whether from an older version of [`favicon_url`], or
-/// typed in by hand) by re-running the same favicon inference against its
-/// origin. Returns `None` if `url` doesn't look like such a guess, or
-/// nothing better than `url` itself could be found — callers should treat
-/// either case as "the original failure stands."
+/// Re-runs favicon inference against `url`'s origin when `url` looks like a
+/// guessed `/favicon.ico` path. `None` means the original failure stands.
 pub fn recover_favicon(url: &str) -> Option<String> {
     if !looks_like_favicon_guess(url) {
         return None;
@@ -36,10 +25,7 @@ pub fn recover_favicon(url: &str) -> Option<String> {
     (recovered != url).then_some(recovered)
 }
 
-/// Whether `url`'s path is exactly the conventional favicon guess
-/// (`/favicon.ico`) rather than a specific image someone picked
-/// deliberately — used to scope [`recover_favicon`] to that narrow case
-/// instead of silently substituting an unrelated icon for any broken URL.
+/// Scopes [`recover_favicon`] to the conventional `/favicon.ico` guess, not any broken URL.
 fn looks_like_favicon_guess(url: &str) -> bool {
     url::Url::parse(url)
         .is_ok_and(|u| u.query().is_none() && u.path().eq_ignore_ascii_case("/favicon.ico"))
@@ -49,15 +35,8 @@ fn looks_like_favicon_guess(url: &str) -> bool {
 /// a page's often much larger body never has to be downloaded.
 const MAX_HTML_SCAN_BYTES: usize = 256 * 1024;
 
-/// Derives the icon to use for `url`, trying in order:
-/// 1. The site's own declared favicon (a `<link rel="icon">`,
-///    `"shortcut icon"`, or `"apple-touch-icon"` tag in its HTML).
-/// 2. DuckDuckGo's favicon lookup service, which succeeds even for sites
-///    (e.g. Cloudflare-protected wikis) whose own responses can't be
-///    fetched directly — DuckDuckGo's own crawler already got past that.
-/// 3. The conventional `/favicon.ico` at the site's origin.
-///
-/// Returns `None` if `url` isn't an absolute `http(s)` URL.
+/// Tries, in order: the site's declared favicon, DuckDuckGo's favicon lookup
+/// (works even behind e.g. Cloudflare), then the conventional `/favicon.ico`.
 fn favicon_url(url: &str) -> Option<String> {
     let fallback = origin_favicon(url)?;
     if let Some(icon) = declared_favicon(url) {
@@ -66,18 +45,14 @@ fn favicon_url(url: &str) -> Option<String> {
     Some(favicon_service_url(url).unwrap_or(fallback))
 }
 
-/// Builds a request to DuckDuckGo's favicon lookup service for `url`'s host.
-/// Doesn't verify the icon actually exists — the service returns *some*
-/// icon (a generic default, if nothing better) for essentially any
-/// reachable host, so this is only used as a fallback once the site's own
-/// favicon couldn't be found directly.
+/// Doesn't verify the icon exists — the service returns *some* icon for
+/// almost any reachable host, so this is only a fallback.
 fn favicon_service_url(url: &str) -> Option<String> {
     let host = url::Url::parse(url).ok()?.host_str()?.to_string();
     Some(format!("https://icons.duckduckgo.com/ip3/{host}.ico"))
 }
 
-/// The conventional favicon location for `url`: `/favicon.ico` at its
-/// origin. Returns `None` if `url` isn't an absolute `http(s)` URL.
+/// Returns `None` if `url` isn't an absolute `http(s)` URL.
 fn origin_favicon(url: &str) -> Option<String> {
     let uri: axum::http::Uri = url.parse().ok()?;
     let scheme = uri.scheme_str()?;
@@ -88,10 +63,7 @@ fn origin_favicon(url: &str) -> Option<String> {
     Some(format!("{scheme}://{authority}/favicon.ico"))
 }
 
-/// Fetches `url`'s HTML and resolves the `href` of the best favicon `<link>`
-/// it declares (see [`find_icon_href`]) against `url`. Returns `None` on any
-/// failure — no network, non-matching page, an unparseable href, etc. —
-/// callers should fall back to [`origin_favicon`].
+/// Returns `None` on any failure; callers should fall back to [`origin_favicon`].
 fn declared_favicon(url: &str) -> Option<String> {
     let mut response = ureq::get(url).call().ok()?;
     let mut bytes = Vec::new();
@@ -108,10 +80,7 @@ fn declared_favicon(url: &str) -> Option<String> {
     base.join(&href).ok().map(String::from)
 }
 
-/// Scans `html` for `<link>` tags declaring a favicon and returns the `href`
-/// of the best match, in document order: an exact `rel="icon"` or
-/// `rel="shortcut icon"` if one exists, otherwise the first other `rel`
-/// containing `"icon"` (e.g. `apple-touch-icon`).
+/// Prefers an exact `rel="icon"`/`"shortcut icon"`, else the first `rel` containing `"icon"`.
 fn find_icon_href(html: &str) -> Option<String> {
     let mut fallback: Option<String> = None;
     for tag in find_tags(html, "link") {
@@ -132,8 +101,7 @@ fn find_icon_href(html: &str) -> Option<String> {
     fallback
 }
 
-/// Returns the inner text (without the surrounding `<`/`>`) of every tag
-/// named `name` found in `html`, matched case-insensitively.
+/// Returns each `<name ...>` tag's inner text (without the surrounding `<`/`>`), case-insensitively.
 fn find_tags<'a>(html: &'a str, name: &str) -> Vec<&'a str> {
     let lower = html.to_lowercase();
     let open = format!("<{name}");
@@ -158,9 +126,7 @@ fn find_tags<'a>(html: &'a str, name: &str) -> Vec<&'a str> {
     tags
 }
 
-/// Parses HTML tag attributes (`name="value"`, `name='value'`, or bare
-/// `name`) out of `tag_inner` — the text between a tag's `<` and `>`.
-/// Attribute names are lowercased; values are kept as-is.
+/// Parses `name="value"`, `name='value'`, or bare `name` attributes from a tag's inner text.
 fn parse_attrs(tag_inner: &str) -> std::collections::HashMap<String, String> {
     let mut attrs = std::collections::HashMap::new();
     let bytes = tag_inner.as_bytes();
@@ -222,9 +188,7 @@ fn parse_attrs(tag_inner: &str) -> std::collections::HashMap<String, String> {
     attrs
 }
 
-/// Extracts the program name/path from a shell command line: the first
-/// token, respecting a leading quoted path (e.g.
-/// `"C:\Program Files\App\app.exe" --flag`).
+/// The first token of `command`, respecting a leading quoted path.
 #[cfg(windows)]
 fn command_program(command: &str) -> Option<&str> {
     let trimmed = command.trim();
@@ -238,9 +202,7 @@ fn command_program(command: &str) -> Option<&str> {
 fn command_icon(command: &str, cache_dir: &Path) -> Option<String> {
     use std::hash::{Hash, Hasher};
 
-    /// Resolves `program` to a file Windows can extract an icon from: as
-    /// given, if it already names a path, or by searching `PATH` (trying a
-    /// `.exe` suffix if the bare name has none).
+    /// As given if it already names a path, else searches `PATH` (trying `.exe`).
     fn resolve_executable(program: &str) -> Option<std::path::PathBuf> {
         let path = Path::new(program);
         if path.components().count() > 1 {

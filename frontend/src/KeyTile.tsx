@@ -20,8 +20,7 @@ interface KeyTileProps {
 
 const IMAGE_FILE_NAME_RE = /\.(png|jpe?g|gif|bmp|webp|ico|svg)$/i;
 
-/** Browsers don't always fill in `File.type` for less common image formats
- * (e.g. `.ico`), so fall back to checking the extension. */
+/** `File.type` is often empty for less common formats (e.g. `.ico`), so fall back to the extension. */
 function isImageFile(file: File): boolean {
   return file.type.startsWith('image/') || IMAGE_FILE_NAME_RE.test(file.name);
 }
@@ -47,11 +46,10 @@ export function KeyTile({
 
   useEffect(() => setBroken(false), [config.icon, version]);
 
-  // Key 0 is reserved on every non-home page: pressing it always goes up a
-  // level, regardless of whatever's configured there.
+  // Key 0 is reserved on every non-home page to go up a level.
   const isBackKey = id === 0 && path.length > 0;
-  // The server falls back to the default folder icon when a folder key has
-  // none of its own set, so folders always have an image to show here.
+  // The server falls back to a default icon for folders, so they always
+  // have an image to show here.
   const showImage =
     !isBackKey && (config.icon !== undefined || config.is_folder) && !broken;
 

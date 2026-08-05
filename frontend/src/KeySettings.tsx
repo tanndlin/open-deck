@@ -21,8 +21,7 @@ interface KeySettingsProps {
   onOpenFolder: (id: number) => void;
 }
 
-// Action kinds the UI knows how to edit. Add a case here (and to the switch
-// in the action editor below) for each new `KeyAction` variant.
+// Add a case here (and to buildAction's switch) for each new `KeyAction` variant.
 const ACTION_TYPES = [
   { value: 'run_command', label: 'Run command' },
   { value: 'open_url', label: 'Open webpage' },

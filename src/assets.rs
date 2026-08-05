@@ -4,14 +4,12 @@ use axum::{
 };
 use rust_embed::RustEmbed;
 
-/// The built React frontend (`frontend/dist`), baked into the binary at
-/// compile time. Run `npm run build` in `frontend/` before `cargo build`.
+/// Baked in at compile time; run `npm run build` in `frontend/` before `cargo build`.
 #[derive(RustEmbed)]
 #[folder = "frontend/dist"]
 struct Assets;
 
-/// Serves an embedded asset by request path, falling back to `index.html`
-/// for both the SPA root and unknown paths (client-side routing).
+/// Falls back to `index.html` for unknown paths, for client-side routing.
 pub async fn static_handler(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     serve(path).unwrap_or_else(|| {

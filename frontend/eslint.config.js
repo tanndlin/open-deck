@@ -24,9 +24,7 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      // Flags resetting derived state from props in an effect (e.g. clearing
-      // an "image failed to load" flag when the source path changes), which
-      // is a standard, sanctioned React pattern rather than a bug.
+      // Flags a sanctioned React pattern (resetting derived state in an effect) as a bug.
       'react-hooks/set-state-in-effect': 'off',
       'react-refresh/only-export-components': [
         'warn',

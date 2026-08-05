@@ -6,13 +6,8 @@ pub struct CachedIcon {
     pub mime: String,
 }
 
-/// Caches images for the lifetime of the program, so repeat pushes
-/// (switching back to a page, re-showing a key) skip re-fetching or
-/// re-encoding them. Shared between the physical-device push path and the
-/// web UI's own image-preview endpoint.
-///
-/// Entries never expire or get invalidated — a changed icon (edited file, or
-/// URL content behind the same link) is only picked up on restart.
+/// Caches images for the program's lifetime so repeat pushes skip re-fetching
+/// or re-encoding. Entries never expire — a changed icon is only picked up on restart.
 #[derive(Default)]
 pub struct IconCache {
     urls: Mutex<HashMap<String, Arc<CachedIcon>>>,
@@ -24,14 +19,9 @@ impl IconCache {
         Self::default()
     }
 
-    /// Returns the raw bytes at `url`, downloading them only on the first
-    /// request for that URL. If the request fails and `url` looks like a
-    /// guessed `/favicon.ico` path, falls back to re-inferring the site's
-    /// real favicon (see [`crate::infer_icon::recover_favicon`]) before
-    /// giving up — this is what lets a manually-typed favicon guess recover
-    /// on its own for sites (e.g. Cloudflare-protected wikis) that block the
-    /// conventional path. Either way, the result is cached under the
-    /// originally requested `url`.
+    /// Downloads `url` only on the first request for it. If the fetch fails and
+    /// `url` looks like a guessed `/favicon.ico` path, falls back to
+    /// [`crate::infer_icon::recover_favicon`] before giving up.
     pub fn get_or_fetch(&self, url: &str) -> Result<Arc<CachedIcon>, String> {
         if let Some(icon) = self.urls.lock().unwrap().get(url) {
             return Ok(Arc::clone(icon));
@@ -72,8 +62,7 @@ impl IconCache {
         Ok(CachedIcon { bytes, mime })
     }
 
-    /// Returns the encoded JPEG bytes for `key`, calling `encode` only on the
-    /// first request for that key.
+    /// Calls `encode` only on the first request for `key`.
     pub fn get_image(
         &self,
         key: &str,
