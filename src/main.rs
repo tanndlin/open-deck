@@ -1,9 +1,8 @@
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use hidapi::{HidApi, HidDevice};
 
-use crate::config::{KeyConfigMap, load_key_config};
+use crate::config::{KeyConfigMap, load_key_config, page_at};
 use crate::push_image::{clear_all_keys, load_key_icons};
 
 mod action;
@@ -18,11 +17,40 @@ const KEY_COUNT: u8 = 15;
 const CONFIG_PATH: &str = "config.json";
 const API_ADDR: &str = "127.0.0.1:3000";
 
+/// The top-left key. On every non-home page, pressing it goes back up one
+/// level instead of running whatever's configured there — but it's still a
+/// perfectly normal key otherwise (icon, action, folder all editable).
+const BACK_KEY: u8 = 0;
+
 /// State shared between the HID polling loop and the REST API.
 struct AppState {
     device: Mutex<HidDevice>,
-    keys: Mutex<KeyConfigMap>,
+    /// The home page, with every subpage nested inside its keys' `folder`
+    /// fields.
+    root: Mutex<KeyConfigMap>,
+    /// The path (sequence of key indices from home) currently pushed onto
+    /// the physical device.
+    current_path: Mutex<Vec<u8>>,
     config_path: String,
+}
+
+/// Clears the device and pushes the page at `path` onto it, then marks it
+/// as the active page. Used both when a folder key or back key is pressed
+/// and when the web UI asks to preview a page on the device.
+pub(crate) fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()> {
+    let root = state.root.lock().unwrap();
+    let Some(page) = page_at(&root, path) else {
+        anyhow::bail!("no page at path {path:?}");
+    };
+
+    let device = state.device.lock().unwrap();
+    clear_all_keys(&device)?;
+    load_key_icons(&device, page)?;
+    drop(root);
+    drop(device);
+
+    *state.current_path.lock().unwrap() = path.to_vec();
+    Ok(())
 }
 
 #[tokio::main]
@@ -44,19 +72,20 @@ async fn main() -> anyhow::Result<()> {
     let device = hid.open(ELGATO_VID, STREAMDECK_MK2_PID)?;
 
     clear_all_keys(&device)?;
-    let keys = if let Some(keys) = load_key_config(CONFIG_PATH)? {
-        load_key_icons(&device, &keys)?;
-        keys
+    let root = if let Some(root) = load_key_config(CONFIG_PATH)? {
+        root
     } else {
         println!("No config at {CONFIG_PATH}, skipping");
-        HashMap::new()
+        KeyConfigMap::new()
     };
+    load_key_icons(&device, &root)?;
 
     device.set_blocking_mode(false)?; // non-blocking so we can poll
 
     let state = Arc::new(AppState {
         device: Mutex::new(device),
-        keys: Mutex::new(keys),
+        root: Mutex::new(root),
+        current_path: Mutex::new(Vec::new()),
         config_path: CONFIG_PATH.to_string(),
     });
 
@@ -116,10 +145,38 @@ fn poll_keys(state: &AppState) {
 }
 
 fn run_key_action(state: &AppState, key: u8) {
-    let action = {
-        let keys = state.keys.lock().unwrap();
-        keys.get(&key).and_then(|c| c.action.clone())
+    let current_path = state.current_path.lock().unwrap().clone();
+
+    // BACK_KEY is reserved for "go up a page" on every page except home, so
+    // it's never looked up in that page's own configured key.
+    if key == BACK_KEY && !current_path.is_empty() {
+        let parent_path = &current_path[..current_path.len() - 1];
+        if let Err(e) = switch_to_path(state, parent_path) {
+            eprintln!("Failed to go up from {current_path:?}: {e}");
+        }
+        return;
+    }
+
+    let (is_folder, action) = {
+        let root = state.root.lock().unwrap();
+        let Some(page) = page_at(&root, &current_path) else {
+            return;
+        };
+        let Some(config) = page.get(&key) else {
+            return;
+        };
+        (config.folder.is_some(), config.action.clone())
     };
+
+    if is_folder {
+        let mut child_path = current_path;
+        child_path.push(key);
+        if let Err(e) = switch_to_path(state, &child_path) {
+            eprintln!("Failed to open folder at {child_path:?}: {e}");
+        }
+        return;
+    }
+
     if let Some(action) = action {
         action.execute();
     }

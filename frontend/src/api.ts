@@ -14,9 +14,22 @@ export type KeyAction = RunCommandAction | OpenUrlAction;
 export interface KeyConfig {
   icon?: string;
   action?: KeyAction;
+  is_folder: boolean;
 }
 
 export type KeyMap = Record<string, KeyConfig>;
+
+/** A sequence of key indices followed from the home page. Empty is home. */
+export type PagePath = number[];
+
+function formatPagePath(path: PagePath): string {
+  return path.length === 0 ? 'home' : path.join('.');
+}
+
+/** Parses the `.`-joined path string the server sends back (or `"home"`). */
+export function parsePagePath(raw: string): PagePath {
+  return raw === 'home' ? [] : raw.split('.').map(Number);
+}
 
 async function checkOk(res: Response): Promise<Response> {
   if (!res.ok) {
@@ -31,31 +44,58 @@ export async function getKeyCount(): Promise<number> {
   return res.json();
 }
 
-export async function listKeys(): Promise<KeyMap> {
-  const res = await checkOk(await fetch('/api/keys'));
-  return res.json();
+/** The page path currently pushed onto the physical device. */
+export async function getCurrentPage(): Promise<PagePath> {
+  const res = await checkOk(await fetch('/api/current-page'));
+  const { path }: { path: string } = await res.json();
+  return parsePagePath(path);
 }
 
-export async function setKeyIcon(id: number, path: string): Promise<void> {
+/** Pushes the page at `path` onto the physical device right away, without waiting for a key press. */
+export async function activatePage(path: PagePath): Promise<void> {
   await checkOk(
-    await fetch(`/api/keys/${id}/icon`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path }),
+    await fetch(`/api/pages/${formatPagePath(path)}/activate`, {
+      method: 'POST',
     }),
   );
 }
 
-export async function clearKeyIcon(id: number): Promise<void> {
-  await checkOk(await fetch(`/api/keys/${id}/icon`, { method: 'DELETE' }));
+export async function listKeys(path: PagePath): Promise<KeyMap> {
+  const res = await checkOk(
+    await fetch(`/api/pages/${formatPagePath(path)}/keys`),
+  );
+  return res.json();
+}
+
+export async function setKeyIcon(
+  path: PagePath,
+  id: number,
+  iconPath: string,
+): Promise<void> {
+  await checkOk(
+    await fetch(`/api/pages/${formatPagePath(path)}/keys/${id}/icon`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: iconPath }),
+    }),
+  );
+}
+
+export async function clearKeyIcon(path: PagePath, id: number): Promise<void> {
+  await checkOk(
+    await fetch(`/api/pages/${formatPagePath(path)}/keys/${id}/icon`, {
+      method: 'DELETE',
+    }),
+  );
 }
 
 export async function setKeyAction(
+  path: PagePath,
   id: number,
   action: KeyAction,
 ): Promise<void> {
   await checkOk(
-    await fetch(`/api/keys/${id}/action`, {
+    await fetch(`/api/pages/${formatPagePath(path)}/keys/${id}/action`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(action),
@@ -63,11 +103,40 @@ export async function setKeyAction(
   );
 }
 
-export async function clearKeyAction(id: number): Promise<void> {
-  await checkOk(await fetch(`/api/keys/${id}/action`, { method: 'DELETE' }));
+export async function clearKeyAction(
+  path: PagePath,
+  id: number,
+): Promise<void> {
+  await checkOk(
+    await fetch(`/api/pages/${formatPagePath(path)}/keys/${id}/action`, {
+      method: 'DELETE',
+    }),
+  );
 }
 
-/** URL for the image currently pushed to a key. `version` busts the browser cache after updates. */
-export function keyImageUrl(id: number, version: number): string {
-  return `/api/keys/${id}/image?v=${version}`;
+/** Turns key `id` on `path` into a folder with its own (initially empty) subpage. */
+export async function createFolder(path: PagePath, id: number): Promise<void> {
+  await checkOk(
+    await fetch(`/api/pages/${formatPagePath(path)}/keys/${id}/folder`, {
+      method: 'PUT',
+    }),
+  );
+}
+
+/** Removes key `id`'s folder, deleting everything nested inside it. */
+export async function deleteFolder(path: PagePath, id: number): Promise<void> {
+  await checkOk(
+    await fetch(`/api/pages/${formatPagePath(path)}/keys/${id}/folder`, {
+      method: 'DELETE',
+    }),
+  );
+}
+
+/** URL for the image currently pushed to a key on `path`. `version` busts the browser cache after updates. */
+export function keyImageUrl(
+  path: PagePath,
+  id: number,
+  version: number,
+): string {
+  return `/api/pages/${formatPagePath(path)}/keys/${id}/image?v=${version}`;
 }

@@ -5,35 +5,41 @@ use axum::{
     extract::{Path, State},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post, put},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::action::Action;
-use crate::config::{KeyConfig, KeyConfigMap, save_key_config};
+use crate::config::{KeyConfig, KeyConfigMap, page_at, page_at_mut, save_key_config};
 use crate::push_image::{clear_key_image, set_key_icon};
-use crate::{AppState, KEY_COUNT};
+use crate::{AppState, KEY_COUNT, switch_to_path};
 
 type ApiError = (StatusCode, String);
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/key-count", get(key_count))
-        .route("/api/keys", get(list_keys))
-        .route("/api/keys/{id}", get(get_key))
+        .route("/api/current-page", get(current_page))
+        .route("/api/pages/{path}/activate", post(activate_page))
+        .route("/api/pages/{path}/keys", get(list_keys))
+        .route("/api/pages/{path}/keys/{id}", get(get_key))
         .route(
-            "/api/keys/{id}/icon",
+            "/api/pages/{path}/keys/{id}/icon",
             get(get_key_icon)
                 .put(set_key_icon_route)
                 .delete(clear_key_icon),
         )
         .route(
-            "/api/keys/{id}/action",
+            "/api/pages/{path}/keys/{id}/action",
             get(get_key_action)
                 .put(set_key_action)
                 .delete(clear_key_action),
         )
-        .route("/api/keys/{id}/image", get(get_key_image))
+        .route(
+            "/api/pages/{path}/keys/{id}/folder",
+            put(create_folder).delete(delete_folder),
+        )
+        .route("/api/pages/{path}/keys/{id}/image", get(get_key_image))
         .with_state(state)
 }
 
@@ -51,11 +57,46 @@ fn check_key_range(id: u8) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Persists `keys`, dropping any entries that are now empty (no icon, no
-/// action) so the config file doesn't accumulate dead keys.
-fn persist(state: &AppState, keys: &mut KeyConfigMap) -> Result<(), ApiError> {
-    keys.retain(|_, c| c.icon.is_some() || c.action.is_some());
-    save_key_config(&state.config_path, keys).map_err(|e| {
+/// Parses a `.`-joined sequence of key indices (e.g. `"3.1"`), or the
+/// literal `"home"` for the empty path.
+fn parse_page_path(raw: &str) -> Result<Vec<u8>, ApiError> {
+    if raw == "home" {
+        return Ok(Vec::new());
+    }
+    raw.split('.')
+        .map(|segment| {
+            segment.parse::<u8>().map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("invalid page path '{raw}'"),
+                )
+            })
+        })
+        .collect()
+}
+
+fn format_page_path(path: &[u8]) -> String {
+    if path.is_empty() {
+        "home".to_string()
+    } else {
+        path.iter().map(u8::to_string).collect::<Vec<_>>().join(".")
+    }
+}
+
+fn page_not_found(raw_path: &str) -> ApiError {
+    (
+        StatusCode::NOT_FOUND,
+        format!("no page at path '{raw_path}'"),
+    )
+}
+
+/// Persists the whole page tree, dropping any key entries that are now
+/// completely empty (no icon, action, or folder) so the config file doesn't
+/// accumulate dead keys.
+fn persist(state: &AppState) -> Result<(), ApiError> {
+    let mut root = state.root.lock().unwrap();
+    prune_empty_keys(&mut root);
+    save_key_config(&state.config_path, &root).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("failed to save config: {e}"),
@@ -63,48 +104,118 @@ fn persist(state: &AppState, keys: &mut KeyConfigMap) -> Result<(), ApiError> {
     })
 }
 
-async fn list_keys(State(state): State<Arc<AppState>>) -> Json<KeyConfigMap> {
-    let keys = state.keys.lock().unwrap();
-    Json(keys.clone())
+fn prune_empty_keys(page: &mut KeyConfigMap) {
+    for config in page.values_mut() {
+        if let Some(folder) = &mut config.folder {
+            prune_empty_keys(folder);
+        }
+    }
+    page.retain(|_, c| c.icon.is_some() || c.action.is_some() || c.folder.is_some());
 }
 
-async fn get_key(State(state): State<Arc<AppState>>, Path(id): Path<u8>) -> Json<KeyConfig> {
-    let keys = state.keys.lock().unwrap();
-    Json(keys.get(&id).cloned().unwrap_or_default())
+#[derive(Serialize)]
+struct CurrentPageResponse {
+    path: String,
+}
+
+async fn current_page(State(state): State<Arc<AppState>>) -> Json<CurrentPageResponse> {
+    let path = state.current_path.lock().unwrap().clone();
+    Json(CurrentPageResponse {
+        path: format_page_path(&path),
+    })
+}
+
+/// Pushes the page at `path` onto the physical device without waiting for a
+/// key press — lets the web UI preview a page.
+async fn activate_page(
+    State(state): State<Arc<AppState>>,
+    Path(raw_path): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let path = parse_page_path(&raw_path)?;
+    switch_to_path(&state, &path).map_err(|_| page_not_found(&raw_path))?;
+    Ok(StatusCode::OK)
+}
+
+/// A key's config as sent to the frontend: `folder` is collapsed to a flag
+/// rather than sending the (potentially large) nested page.
+#[derive(Serialize)]
+struct KeyConfigView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    action: Option<Action>,
+    is_folder: bool,
+}
+
+impl From<&KeyConfig> for KeyConfigView {
+    fn from(config: &KeyConfig) -> Self {
+        Self {
+            icon: config.icon.clone(),
+            action: config.action.clone(),
+            is_folder: config.folder.is_some(),
+        }
+    }
+}
+
+async fn list_keys(
+    State(state): State<Arc<AppState>>,
+    Path(raw_path): Path<String>,
+) -> Result<Json<std::collections::HashMap<u8, KeyConfigView>>, ApiError> {
+    let path = parse_page_path(&raw_path)?;
+    let root = state.root.lock().unwrap();
+    let page = page_at(&root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+    Ok(Json(page.iter().map(|(&id, c)| (id, c.into())).collect()))
+}
+
+async fn get_key(
+    State(state): State<Arc<AppState>>,
+    Path((raw_path, id)): Path<(String, u8)>,
+) -> Result<Json<KeyConfigView>, ApiError> {
+    let path = parse_page_path(&raw_path)?;
+    let root = state.root.lock().unwrap();
+    let page = page_at(&root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+    Ok(Json(page.get(&id).map_or_else(
+        || (&KeyConfig::default()).into(),
+        Into::into,
+    )))
 }
 
 async fn get_key_icon(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<u8>,
+    Path((raw_path, id)): Path<(String, u8)>,
 ) -> Result<Json<String>, ApiError> {
-    let keys = state.keys.lock().unwrap();
-    match keys.get(&id).and_then(|c| c.icon.clone()) {
-        Some(path) => Ok(Json(path)),
+    let path = parse_page_path(&raw_path)?;
+    let root = state.root.lock().unwrap();
+    let page = page_at(&root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+    match page.get(&id).and_then(|c| c.icon.clone()) {
+        Some(icon) => Ok(Json(icon)),
         None => Err((StatusCode::NOT_FOUND, format!("no icon set for key {id}"))),
     }
 }
 
 async fn get_key_image(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<u8>,
+    Path((raw_path, id)): Path<(String, u8)>,
 ) -> Result<Response, ApiError> {
-    let path = {
-        let keys = state.keys.lock().unwrap();
-        keys.get(&id).and_then(|c| c.icon.clone())
+    let path = parse_page_path(&raw_path)?;
+    let icon = {
+        let root = state.root.lock().unwrap();
+        let page = page_at(&root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+        page.get(&id).and_then(|c| c.icon.clone())
     };
-    let path = path.ok_or_else(|| (StatusCode::NOT_FOUND, format!("no icon set for key {id}")))?;
+    let icon = icon.ok_or_else(|| (StatusCode::NOT_FOUND, format!("no icon set for key {id}")))?;
 
-    if path.starts_with("http://") || path.starts_with("https://") {
-        let (bytes, mime) = tokio::task::spawn_blocking(move || fetch_remote_icon(&path))
+    if icon.starts_with("http://") || icon.starts_with("https://") {
+        let (bytes, mime) = tokio::task::spawn_blocking(move || fetch_remote_icon(&icon))
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))??;
         return Ok(([(header::CONTENT_TYPE, mime)], bytes).into_response());
     }
 
-    let bytes = tokio::fs::read(&path)
+    let bytes = tokio::fs::read(&icon)
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, format!("failed to read icon: {e}")))?;
-    let mime = mime_guess::from_path(&path).first_or_octet_stream();
+    let mime = mime_guess::from_path(&icon).first_or_octet_stream();
 
     Ok(([(header::CONTENT_TYPE, mime.as_ref())], bytes).into_response())
 }
@@ -142,12 +253,16 @@ struct SetIconRequest {
 
 async fn set_key_icon_route(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<u8>,
+    Path((raw_path, id)): Path<(String, u8)>,
     Json(req): Json<SetIconRequest>,
 ) -> Result<StatusCode, ApiError> {
     check_key_range(id)?;
+    let path = parse_page_path(&raw_path)?;
 
-    {
+    // Only push to the physical device if the edited page is the one
+    // currently shown — otherwise it'll be picked up next time it's
+    // activated.
+    if path == *state.current_path.lock().unwrap() {
         let device = state.device.lock().unwrap();
         set_key_icon(&device, id, &req.path).map_err(|e| {
             (
@@ -157,20 +272,23 @@ async fn set_key_icon_route(
         })?;
     }
 
-    let mut keys = state.keys.lock().unwrap();
-    keys.entry(id).or_default().icon = Some(req.path);
-    persist(&state, &mut keys)?;
+    let mut root = state.root.lock().unwrap();
+    let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+    page.entry(id).or_default().icon = Some(req.path);
+    drop(root);
 
+    persist(&state)?;
     Ok(StatusCode::OK)
 }
 
 async fn clear_key_icon(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<u8>,
+    Path((raw_path, id)): Path<(String, u8)>,
 ) -> Result<StatusCode, ApiError> {
     check_key_range(id)?;
+    let path = parse_page_path(&raw_path)?;
 
-    {
+    if path == *state.current_path.lock().unwrap() {
         let device = state.device.lock().unwrap();
         clear_key_image(&device, id).map_err(|e| {
             (
@@ -180,21 +298,25 @@ async fn clear_key_icon(
         })?;
     }
 
-    let mut keys = state.keys.lock().unwrap();
-    if let Some(config) = keys.get_mut(&id) {
+    let mut root = state.root.lock().unwrap();
+    let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+    if let Some(config) = page.get_mut(&id) {
         config.icon = None;
     }
-    persist(&state, &mut keys)?;
+    drop(root);
 
+    persist(&state)?;
     Ok(StatusCode::OK)
 }
 
 async fn get_key_action(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<u8>,
+    Path((raw_path, id)): Path<(String, u8)>,
 ) -> Result<Json<Action>, ApiError> {
-    let keys = state.keys.lock().unwrap();
-    match keys.get(&id).and_then(|c| c.action.clone()) {
+    let path = parse_page_path(&raw_path)?;
+    let root = state.root.lock().unwrap();
+    let page = page_at(&root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+    match page.get(&id).and_then(|c| c.action.clone()) {
         Some(action) => Ok(Json(action)),
         None => Err((StatusCode::NOT_FOUND, format!("no action set for key {id}"))),
     }
@@ -202,29 +324,96 @@ async fn get_key_action(
 
 async fn set_key_action(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<u8>,
+    Path((raw_path, id)): Path<(String, u8)>,
     Json(action): Json<Action>,
 ) -> Result<StatusCode, ApiError> {
     check_key_range(id)?;
+    let path = parse_page_path(&raw_path)?;
 
-    let mut keys = state.keys.lock().unwrap();
-    keys.entry(id).or_default().action = Some(action);
-    persist(&state, &mut keys)?;
+    let mut root = state.root.lock().unwrap();
+    let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+    let config = page.entry(id).or_default();
+    if config.folder.is_some() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "key is a folder; remove the folder before setting an action".into(),
+        ));
+    }
+    config.action = Some(action);
+    drop(root);
 
+    persist(&state)?;
     Ok(StatusCode::OK)
 }
 
 async fn clear_key_action(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<u8>,
+    Path((raw_path, id)): Path<(String, u8)>,
 ) -> Result<StatusCode, ApiError> {
     check_key_range(id)?;
+    let path = parse_page_path(&raw_path)?;
 
-    let mut keys = state.keys.lock().unwrap();
-    if let Some(config) = keys.get_mut(&id) {
+    let mut root = state.root.lock().unwrap();
+    let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+    if let Some(config) = page.get_mut(&id) {
         config.action = None;
     }
-    persist(&state, &mut keys)?;
+    drop(root);
+
+    persist(&state)?;
+    Ok(StatusCode::OK)
+}
+
+/// Turns key `id` on `path` into a folder, giving it an (initially empty)
+/// nested page. Idempotent — does nothing if it's already a folder, so an
+/// existing nested page is never wiped out.
+async fn create_folder(
+    State(state): State<Arc<AppState>>,
+    Path((raw_path, id)): Path<(String, u8)>,
+) -> Result<StatusCode, ApiError> {
+    check_key_range(id)?;
+    let path = parse_page_path(&raw_path)?;
+
+    let mut root = state.root.lock().unwrap();
+    let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+    let config = page.entry(id).or_default();
+    if config.folder.is_none() {
+        config.folder = Some(KeyConfigMap::new());
+        config.action = None;
+    }
+    drop(root);
+
+    persist(&state)?;
+    Ok(StatusCode::CREATED)
+}
+
+/// Removes key `id`'s folder, deleting everything nested inside it — the
+/// folder's page is only ever reachable through this key.
+async fn delete_folder(
+    State(state): State<Arc<AppState>>,
+    Path((raw_path, id)): Path<(String, u8)>,
+) -> Result<StatusCode, ApiError> {
+    check_key_range(id)?;
+    let path = parse_page_path(&raw_path)?;
+
+    let mut root = state.root.lock().unwrap();
+    let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+    let removed = page.get_mut(&id).is_some_and(|c| c.folder.take().is_some());
+    drop(root);
+
+    if !removed {
+        return Err((StatusCode::NOT_FOUND, format!("key {id} is not a folder")));
+    }
+
+    let mut folder_path = path.clone();
+    folder_path.push(id);
+    let device_was_inside = state.current_path.lock().unwrap().starts_with(&folder_path);
+
+    persist(&state)?;
+
+    if device_was_inside && let Err(e) = switch_to_path(&state, &path) {
+        eprintln!("Failed to switch back after deleting the active folder: {e}");
+    }
 
     Ok(StatusCode::OK)
 }
