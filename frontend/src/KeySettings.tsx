@@ -139,6 +139,12 @@ export function KeySettings({
           placeholder="icons/example.png or https://…"
           disabled={busy}
           onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && draft.trim() !== '') {
+              e.preventDefault();
+              run(() => onSetIcon(id, draft.trim()));
+            }
+          }}
         />
       </label>
 
@@ -215,6 +221,12 @@ export function KeySettings({
                 placeholder="python script.py"
                 disabled={busy}
                 onChange={(e) => setCommand(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && actionValid) {
+                    e.preventDefault();
+                    run(() => onSetAction(id, buildAction()));
+                  }
+                }}
               />
             </label>
           )}
@@ -229,6 +241,12 @@ export function KeySettings({
                 placeholder="https://example.com"
                 disabled={busy}
                 onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && actionValid) {
+                    e.preventDefault();
+                    run(() => onSetAction(id, buildAction()));
+                  }
+                }}
               />
             </label>
           )}
