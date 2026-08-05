@@ -23,13 +23,31 @@ pub fn infer_icon(action: &Action, cache_dir: &Path) -> Option<String> {
 /// a page's often much larger body never has to be downloaded.
 const MAX_HTML_SCAN_BYTES: usize = 256 * 1024;
 
-/// Derives the icon to use for `url`: the site's own declared favicon (a
-/// `<link rel="icon">`, `"shortcut icon"`, or `"apple-touch-icon"` tag in its
-/// HTML) if it has one, otherwise the conventional `/favicon.ico` at its
-/// origin. Returns `None` if `url` isn't an absolute `http(s)` URL.
+/// Derives the icon to use for `url`, trying in order:
+/// 1. The site's own declared favicon (a `<link rel="icon">`,
+///    `"shortcut icon"`, or `"apple-touch-icon"` tag in its HTML).
+/// 2. DuckDuckGo's favicon lookup service, which succeeds even for sites
+///    (e.g. Cloudflare-protected wikis) whose own responses can't be
+///    fetched directly — DuckDuckGo's own crawler already got past that.
+/// 3. The conventional `/favicon.ico` at the site's origin.
+///
+/// Returns `None` if `url` isn't an absolute `http(s)` URL.
 fn favicon_url(url: &str) -> Option<String> {
     let fallback = origin_favicon(url)?;
-    Some(declared_favicon(url).unwrap_or(fallback))
+    if let Some(icon) = declared_favicon(url) {
+        return Some(icon);
+    }
+    Some(favicon_service_url(url).unwrap_or(fallback))
+}
+
+/// Builds a request to DuckDuckGo's favicon lookup service for `url`'s host.
+/// Doesn't verify the icon actually exists — the service returns *some*
+/// icon (a generic default, if nothing better) for essentially any
+/// reachable host, so this is only used as a fallback once the site's own
+/// favicon couldn't be found directly.
+fn favicon_service_url(url: &str) -> Option<String> {
+    let host = url::Url::parse(url).ok()?.host_str()?.to_string();
+    Some(format!("https://icons.duckduckgo.com/ip3/{host}.ico"))
 }
 
 /// The conventional favicon location for `url`: `/favicon.ico` at its
@@ -272,6 +290,15 @@ mod tests {
         );
         assert_eq!(origin_favicon("not a url"), None);
         assert_eq!(origin_favicon("ftp://example.com/x"), None);
+    }
+
+    #[test]
+    fn favicon_service_url_derives_from_host() {
+        assert_eq!(
+            favicon_service_url("https://example.com/some/page"),
+            Some("https://icons.duckduckgo.com/ip3/example.com.ico".to_string())
+        );
+        assert_eq!(favicon_service_url("not a url"), None);
     }
 
     #[test]
