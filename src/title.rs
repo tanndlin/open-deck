@@ -5,8 +5,8 @@ use imageproc::rect::Rect;
 
 use crate::push_image::ICON_SIZE;
 
-const TITLE_BAR_HEIGHT: u32 = 18;
-const TITLE_FONT_SIZE: f32 = 13.0;
+const TITLE_BAR_HEIGHT: u32 = 22;
+const TITLE_FONT_SIZE: f32 = 18.0;
 
 #[cfg(target_os = "windows")]
 const CANDIDATE_FONT_PATHS: &[&str] = &[
