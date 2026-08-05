@@ -1,3 +1,4 @@
+use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use serde::{Deserialize, Serialize};
 
 /// Something that can be bound to a key and run when it's pressed.
@@ -5,9 +6,22 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
-    RunCommand { command: String },
-    OpenUrl { url: String },
-    OpenFolder { path: String },
+    RunCommand {
+        command: String,
+    },
+    OpenUrl {
+        url: String,
+    },
+    OpenFolder {
+        path: String,
+    },
+    TypeText {
+        text: String,
+    },
+    /// Key names pressed together, e.g. `["ctrl", "c"]`. See `parse_key` for accepted names.
+    Hotkey {
+        keys: Vec<String>,
+    },
 }
 
 impl Action {
@@ -28,8 +42,88 @@ impl Action {
                     eprintln!("Failed to open folder '{path}': {e}");
                 }
             }
+            Action::TypeText { text } => {
+                if let Err(e) = type_text(text) {
+                    eprintln!("Failed to type text: {e}");
+                }
+            }
+            Action::Hotkey { keys } => {
+                if let Err(e) = press_hotkey(keys) {
+                    eprintln!("Failed to send hotkey '{}': {e}", keys.join("+"));
+                }
+            }
         }
     }
+}
+
+fn type_text(text: &str) -> anyhow::Result<()> {
+    let mut enigo = Enigo::new(&Settings::default())?;
+    enigo.text(text)?;
+    Ok(())
+}
+
+/// Presses `keys` down in order, then releases them in reverse order.
+fn press_hotkey(keys: &[String]) -> anyhow::Result<()> {
+    let parsed = keys
+        .iter()
+        .map(|name| parse_key(name).ok_or_else(|| anyhow::anyhow!("unknown key '{name}'")))
+        .collect::<anyhow::Result<Vec<Key>>>()?;
+
+    let mut enigo = Enigo::new(&Settings::default())?;
+    for &key in &parsed {
+        enigo.key(key, Direction::Press)?;
+    }
+    for &key in parsed.iter().rev() {
+        enigo.key(key, Direction::Release)?;
+    }
+    Ok(())
+}
+
+/// Maps a human-typed key name (case-insensitive) to an enigo [`Key`]. Single
+/// characters fall through to [`Key::Unicode`] so letters/digits/symbols work
+/// without needing an entry here.
+fn parse_key(name: &str) -> Option<Key> {
+    let lower = name.to_ascii_lowercase();
+    Some(match lower.as_str() {
+        "ctrl" | "control" => Key::Control,
+        "alt" | "option" => Key::Alt,
+        "shift" => Key::Shift,
+        "meta" | "cmd" | "command" | "win" | "windows" | "super" => Key::Meta,
+        "enter" | "return" => Key::Return,
+        "esc" | "escape" => Key::Escape,
+        "tab" => Key::Tab,
+        "space" => Key::Space,
+        "backspace" => Key::Backspace,
+        "del" | "delete" => Key::Delete,
+        "ins" | "insert" => Key::Insert,
+        "up" | "uparrow" => Key::UpArrow,
+        "down" | "downarrow" => Key::DownArrow,
+        "left" | "leftarrow" => Key::LeftArrow,
+        "right" | "rightarrow" => Key::RightArrow,
+        "home" => Key::Home,
+        "end" => Key::End,
+        "pageup" => Key::PageUp,
+        "pagedown" => Key::PageDown,
+        "capslock" => Key::CapsLock,
+        "f1" => Key::F1,
+        "f2" => Key::F2,
+        "f3" => Key::F3,
+        "f4" => Key::F4,
+        "f5" => Key::F5,
+        "f6" => Key::F6,
+        "f7" => Key::F7,
+        "f8" => Key::F8,
+        "f9" => Key::F9,
+        "f10" => Key::F10,
+        "f11" => Key::F11,
+        "f12" => Key::F12,
+        // Lowercased: on Windows, VkKeyScanExW packs shift-state into the same
+        // byte range enigo reads back as the virtual-key code, so an uppercase
+        // letter (which needs Shift) maps to a bogus key and silently no-ops.
+        // A hotkey combo doesn't care about case anyway — Ctrl+S is Ctrl+s.
+        _ if lower.chars().count() == 1 => Key::Unicode(lower.chars().next()?),
+        _ => return None,
+    })
 }
 
 #[cfg(target_os = "windows")]

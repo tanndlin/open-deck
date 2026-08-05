@@ -9,6 +9,7 @@ pub fn infer_icon(action: &Action, cache_dir: &Path) -> Option<String> {
         Action::OpenUrl { url } => favicon_url(url),
         Action::RunCommand { command } => command_icon(command, cache_dir),
         Action::OpenFolder { .. } => None,
+        Action::TypeText { .. } | Action::Hotkey { .. } => None,
     }
 }
 

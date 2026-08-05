@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
+  ACTION_TYPES,
   keyImageUrl,
+  type ActionType,
   type KeyAction,
   type KeyConfig,
   type PagePath,
@@ -21,12 +23,13 @@ interface KeySettingsProps {
   onOpenFolder: (id: number) => void;
 }
 
-// Add a case here (and to buildAction's switch) for each new `KeyAction` variant.
-const ACTION_TYPES = [
-  { value: 'run_command', label: 'Run command' },
-  { value: 'open_url', label: 'Open webpage' },
-  { value: 'open_folder', label: 'Open folder' },
-] as const;
+/** Splits a `+`-joined hotkey string (e.g. "ctrl+alt+del") into key names. */
+function parseHotkeyKeys(input: string): string[] {
+  return input
+    .split('+')
+    .map((k) => k.trim())
+    .filter((k) => k !== '');
+}
 
 export function KeySettings({
   id,
@@ -48,7 +51,7 @@ export function KeySettings({
   const [error, setError] = useState<string | null>(null);
   const [previewBroken, setPreviewBroken] = useState(false);
 
-  const [actionType, setActionType] = useState<KeyAction['type']>(
+  const [actionType, setActionType] = useState<ActionType>(
     action?.type ?? 'run_command',
   );
   const [command, setCommand] = useState(
@@ -57,6 +60,12 @@ export function KeySettings({
   const [url, setUrl] = useState(action?.type === 'open_url' ? action.url : '');
   const [folderPath, setFolderPath] = useState(
     action?.type === 'open_folder' ? action.path : '',
+  );
+  const [typeTextValue, setTypeTextValue] = useState(
+    action?.type === 'type_text' ? action.text : '',
+  );
+  const [hotkeyInput, setHotkeyInput] = useState(
+    action?.type === 'hotkey' ? action.keys.join('+') : '',
   );
 
   useEffect(() => setPreviewBroken(false), [icon, version]);
@@ -89,6 +98,10 @@ export function KeySettings({
         return { type: 'open_url', url: url.trim() };
       case 'open_folder':
         return { type: 'open_folder', path: folderPath.trim() };
+      case 'type_text':
+        return { type: 'type_text', text: typeTextValue };
+      case 'hotkey':
+        return { type: 'hotkey', keys: parseHotkeyKeys(hotkeyInput) };
     }
   }
 
@@ -97,7 +110,11 @@ export function KeySettings({
       ? command.trim() !== ''
       : actionType === 'open_url'
         ? url.trim() !== ''
-        : folderPath.trim() !== '';
+        : actionType === 'open_folder'
+          ? folderPath.trim() !== ''
+          : actionType === 'type_text'
+            ? typeTextValue !== ''
+            : parseHotkeyKeys(hotkeyInput).length > 0;
 
   function handleRemoveFolder() {
     if (
@@ -280,6 +297,46 @@ export function KeySettings({
             </label>
           )}
 
+          {actionType === 'type_text' && (
+            <label className="flex flex-col gap-1.5 text-[13px] text-text">
+              Text to type
+              <input
+                type="text"
+                className="rounded-sm border border-border bg-bg px-2 py-1.5 font-mono text-sm text-text-h"
+                value={typeTextValue}
+                placeholder="Hello, world!"
+                disabled={busy}
+                onChange={(e) => setTypeTextValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && actionValid) {
+                    e.preventDefault();
+                    run(() => onSetAction(id, buildAction()));
+                  }
+                }}
+              />
+            </label>
+          )}
+
+          {actionType === 'hotkey' && (
+            <label className="flex flex-col gap-1.5 text-[13px] text-text">
+              Keys (joined with +)
+              <input
+                type="text"
+                className="rounded-sm border border-border bg-bg px-2 py-1.5 font-mono text-sm text-text-h"
+                value={hotkeyInput}
+                placeholder="ctrl+c, escape, del"
+                disabled={busy}
+                onChange={(e) => setHotkeyInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && actionValid) {
+                    e.preventDefault();
+                    run(() => onSetAction(id, buildAction()));
+                  }
+                }}
+              />
+            </label>
+          )}
+
           <div className="flex gap-2">
             <button
               type="button"
@@ -299,6 +356,8 @@ export function KeySettings({
                     setCommand('');
                     setUrl('');
                     setFolderPath('');
+                    setTypeTextValue('');
+                    setHotkeyInput('');
                   }),
                 )
               }
