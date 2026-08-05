@@ -301,7 +301,7 @@ async fn clear_key_icon(
 
     if path == *state.current_path.lock().unwrap() {
         let device = state.device.lock().unwrap();
-        clear_key_image(&device, id).map_err(|e| {
+        clear_key_image(&device, id, &state.icon_cache).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("failed to clear key: {e}"),

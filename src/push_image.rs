@@ -17,6 +17,13 @@ const BACK_ARROW_BYTES: &[u8] = include_bytes!("../assets/back_arrow.png");
 /// and KeyTile.tsx).
 pub const FOLDER_ICON_BYTES: &[u8] = include_bytes!("../assets/folder.png");
 
+// `IconCache::get_or_encode` keys for the fixed (non-configurable) icons
+// below. NUL-prefixed so they can never collide with a real icon path or
+// URL, which is what every other cache key is.
+const BLANK_CACHE_KEY: &str = "\0blank";
+const BACK_ARROW_CACHE_KEY: &str = "\0back_arrow";
+const FOLDER_ICON_CACHE_KEY: &str = "\0folder";
+
 // Image reports are fixed 1024-byte HID output reports:
 // [0x02, 0x07, key, is_last, len_lo, len_hi, page_lo, page_hi] + up to 1016
 // bytes of JPEG payload, zero-padded to fill the report.
@@ -89,57 +96,57 @@ fn set_key_image(device: &HidDevice, key: u8, jpeg: &[u8]) -> anyhow::Result<()>
 }
 
 /// Clears a key's image (sets it to solid black).
-pub fn clear_key_image(device: &HidDevice, key: u8) -> anyhow::Result<()> {
-    let blank = DynamicImage::new_rgb8(ICON_SIZE, ICON_SIZE);
-    let jpeg = encode_key_image(&blank)?;
+pub fn clear_key_image(device: &HidDevice, key: u8, cache: &IconCache) -> anyhow::Result<()> {
+    let jpeg = cache.get_image(BLANK_CACHE_KEY, || {
+        encode_key_image(&DynamicImage::new_rgb8(ICON_SIZE, ICON_SIZE))
+    })?;
     set_key_image(device, key, &jpeg)
 }
 
 /// Clears every key's image.
-pub fn clear_all_keys(device: &HidDevice) -> anyhow::Result<()> {
+pub fn clear_all_keys(device: &HidDevice, cache: &IconCache) -> anyhow::Result<()> {
     for key in 0..KEY_COUNT {
-        clear_key_image(device, key)?;
+        clear_key_image(device, key, cache)?;
     }
     Ok(())
 }
 
 /// Pushes the "go up a level" arrow onto `key`, overriding whatever icon
 /// (if any) is configured there.
-pub fn set_back_arrow_icon(device: &HidDevice, key: u8) -> anyhow::Result<()> {
-    let img = image::load_from_memory(BACK_ARROW_BYTES)?;
-    let jpeg = encode_key_image(&img)?;
+pub fn set_back_arrow_icon(device: &HidDevice, key: u8, cache: &IconCache) -> anyhow::Result<()> {
+    let jpeg = cache.get_image(BACK_ARROW_CACHE_KEY, || {
+        encode_key_image(&image::load_from_memory(BACK_ARROW_BYTES)?)
+    })?;
     set_key_image(device, key, &jpeg)
 }
 
 /// Pushes the default folder icon onto `key`.
-pub fn set_folder_icon(device: &HidDevice, key: u8) -> anyhow::Result<()> {
-    let img = image::load_from_memory(FOLDER_ICON_BYTES)?;
-    let jpeg = encode_key_image(&img)?;
+pub fn set_folder_icon(device: &HidDevice, key: u8, cache: &IconCache) -> anyhow::Result<()> {
+    let jpeg = cache.get_image(FOLDER_ICON_CACHE_KEY, || {
+        encode_key_image(&image::load_from_memory(FOLDER_ICON_BYTES)?)
+    })?;
     set_key_image(device, key, &jpeg)
 }
 
-/// Loads an image from a local file path or, if `source` is an `http(s)`
-/// URL, downloads it (via `cache`) — so icons can point at a link instead of
-/// requiring the image to be saved to disk first.
-pub fn load_image(source: &str, cache: &IconCache) -> anyhow::Result<DynamicImage> {
-    if source.starts_with("http://") || source.starts_with("https://") {
-        let icon = cache.get_or_fetch(source).map_err(|e| anyhow::anyhow!(e))?;
-        Ok(image::load_from_memory(&icon.bytes)?)
-    } else {
-        Ok(image::open(source)?)
-    }
-}
-
-/// Loads the image at `path` (a local path or `http(s)` URL) and pushes it
-/// to `key`.
+/// Loads the image at `path` (a local path or `http(s)` URL), encodes it for
+/// the device, and pushes it to `key`. The encoded result is cached by
+/// `cache` under `path`, so the disk read / network fetch, resize, and JPEG
+/// encode only ever happen once per icon.
 pub fn set_key_icon(
     device: &HidDevice,
     key: u8,
     path: &str,
     cache: &IconCache,
 ) -> anyhow::Result<()> {
-    let img = load_image(path, cache)?;
-    let jpeg = encode_key_image(&img)?;
+    let jpeg = cache.get_image(path, || {
+        let image = if path.starts_with("http://") || path.starts_with("https://") {
+            let icon = cache.get_or_fetch(path).map_err(|e| anyhow::anyhow!(e))?;
+            image::load_from_memory(&icon.bytes)?
+        } else {
+            image::open(path)?
+        };
+        encode_key_image(&image)
+    })?;
     set_key_image(device, key, &jpeg)
 }
 
@@ -164,7 +171,7 @@ pub fn load_key_icons(
                 #[cfg(debug_assertions)]
                 println!("Set key {key} image from {path}");
             }
-            None if config.folder.is_some() => set_folder_icon(device, key)?,
+            None if config.folder.is_some() => set_folder_icon(device, key, cache)?,
             None => {}
         }
     }

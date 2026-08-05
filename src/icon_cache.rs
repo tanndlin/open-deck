@@ -1,24 +1,22 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-
-/// How long a downloaded remote icon is reused before being re-fetched.
-/// Every page navigation re-pushes every key's icon to the device *and* the
-/// web UI re-requests every key's image, so an uncached URL icon costs two
-/// network round trips per navigation. Icons rarely change, so a modest TTL
-/// avoids nearly all of that cost.
-const TTL: Duration = Duration::from_mins(5);
 
 pub struct CachedIcon {
     pub bytes: Vec<u8>,
     pub mime: String,
 }
 
-/// Caches downloaded `http(s)` icons, shared between the physical-device
-/// push path and the web UI's own image-preview endpoint.
+/// Caches images for the lifetime of the program, so repeat pushes
+/// (switching back to a page, re-showing a key) skip re-fetching or
+/// re-encoding them. Shared between the physical-device push path and the
+/// web UI's own image-preview endpoint.
+///
+/// Entries never expire or get invalidated — a changed icon (edited file, or
+/// URL content behind the same link) is only picked up on restart.
 #[derive(Default)]
 pub struct IconCache {
-    entries: Mutex<HashMap<String, (Instant, Arc<CachedIcon>)>>,
+    urls: Mutex<HashMap<String, Arc<CachedIcon>>>,
+    encoded: Mutex<HashMap<String, Arc<Vec<u8>>>>,
 }
 
 impl IconCache {
@@ -26,12 +24,10 @@ impl IconCache {
         Self::default()
     }
 
-    /// Returns the icon at `url`, downloading it only if there's no fresh
-    /// cached copy.
+    /// Returns the raw bytes at `url`, downloading them only on the first
+    /// request for that URL.
     pub fn get_or_fetch(&self, url: &str) -> Result<Arc<CachedIcon>, String> {
-        if let Some((fetched_at, icon)) = self.entries.lock().unwrap().get(url)
-            && fetched_at.elapsed() < TTL
-        {
+        if let Some(icon) = self.urls.lock().unwrap().get(url) {
             return Ok(Arc::clone(icon));
         }
 
@@ -52,10 +48,29 @@ impl IconCache {
             .map_err(|e| format!("failed to read icon: {e}"))?;
 
         let icon = Arc::new(CachedIcon { bytes, mime });
-        self.entries
+        self.urls
             .lock()
             .unwrap()
-            .insert(url.to_string(), (Instant::now(), Arc::clone(&icon)));
+            .insert(url.to_string(), Arc::clone(&icon));
         Ok(icon)
+    }
+
+    /// Returns the encoded JPEG bytes for `key`, calling `encode` only on the
+    /// first request for that key.
+    pub fn get_image(
+        &self,
+        key: &str,
+        encode: impl FnOnce() -> anyhow::Result<Vec<u8>>,
+    ) -> anyhow::Result<Arc<Vec<u8>>> {
+        if let Some(jpeg) = self.encoded.lock().unwrap().get(key) {
+            return Ok(Arc::clone(jpeg));
+        }
+
+        let jpeg = Arc::new(encode()?);
+        self.encoded
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), Arc::clone(&jpeg));
+        Ok(jpeg)
     }
 }

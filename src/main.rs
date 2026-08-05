@@ -47,12 +47,12 @@ pub(crate) fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()
     };
 
     let device = state.device.lock().unwrap();
-    clear_all_keys(&device)?;
+    clear_all_keys(&device, &state.icon_cache)?;
     load_key_icons(&device, page, &state.icon_cache)?;
     // Every non-home page reserves this key to go up a level, regardless of
     // whatever's configured for it — matches KeyTile.tsx's isBackKey.
     if !path.is_empty() {
-        set_back_arrow_icon(&device, BACK_KEY)?;
+        set_back_arrow_icon(&device, BACK_KEY, &state.icon_cache)?;
     }
     drop(root);
     drop(device);
@@ -78,15 +78,15 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let device = hid.open(ELGATO_VID, STREAMDECK_MK2_PID)?;
+    let icon_cache = IconCache::new();
 
-    clear_all_keys(&device)?;
+    clear_all_keys(&device, &icon_cache)?;
     let root = if let Some(root) = load_key_config(CONFIG_PATH)? {
         root
     } else {
         println!("No config at {CONFIG_PATH}, skipping");
         KeyConfigMap::new()
     };
-    let icon_cache = IconCache::new();
     load_key_icons(&device, &root, &icon_cache)?;
 
     device.set_blocking_mode(false)?; // non-blocking so we can poll
