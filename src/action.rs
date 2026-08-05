@@ -12,6 +12,8 @@ pub enum Action {
     RunCommand { command: String },
     /// Opens `url` in the system's default browser.
     OpenUrl { url: String },
+    /// Opens `path` in the system's file manager.
+    OpenFolder { path: String },
 }
 
 impl Action {
@@ -25,6 +27,11 @@ impl Action {
             Action::OpenUrl { url } => {
                 if let Err(e) = open_url_command(url).spawn() {
                     eprintln!("Failed to open URL '{url}': {e}");
+                }
+            }
+            Action::OpenFolder { path } => {
+                if let Err(e) = open_folder_command(path).spawn() {
+                    eprintln!("Failed to open folder '{path}': {e}");
                 }
             }
         }
@@ -64,5 +71,26 @@ fn open_url_command(url: &str) -> std::process::Command {
 fn open_url_command(url: &str) -> std::process::Command {
     let mut c = std::process::Command::new("xdg-open");
     c.arg(url);
+    c
+}
+
+#[cfg(target_os = "windows")]
+fn open_folder_command(path: &str) -> std::process::Command {
+    let mut c = std::process::Command::new("explorer");
+    c.arg(path);
+    c
+}
+
+#[cfg(target_os = "macos")]
+fn open_folder_command(path: &str) -> std::process::Command {
+    let mut c = std::process::Command::new("open");
+    c.arg(path);
+    c
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_folder_command(path: &str) -> std::process::Command {
+    let mut c = std::process::Command::new("xdg-open");
+    c.arg(path);
     c
 }

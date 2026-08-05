@@ -8,8 +8,13 @@ export interface OpenUrlAction {
   url: string;
 }
 
+export interface OpenFolderAction {
+  type: 'open_folder';
+  path: string;
+}
+
 /** Union of all action kinds. Add new variants here as the backend gains them. */
-export type KeyAction = RunCommandAction | OpenUrlAction;
+export type KeyAction = RunCommandAction | OpenUrlAction | OpenFolderAction;
 
 export interface KeyConfig {
   icon?: string;

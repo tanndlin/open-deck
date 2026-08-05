@@ -26,6 +26,7 @@ interface KeySettingsProps {
 const ACTION_TYPES = [
   { value: 'run_command', label: 'Run command' },
   { value: 'open_url', label: 'Open webpage' },
+  { value: 'open_folder', label: 'Open folder' },
 ] as const;
 
 export function KeySettings({
@@ -55,6 +56,9 @@ export function KeySettings({
     action?.type === 'run_command' ? action.command : '',
   );
   const [url, setUrl] = useState(action?.type === 'open_url' ? action.url : '');
+  const [folderPath, setFolderPath] = useState(
+    action?.type === 'open_folder' ? action.path : '',
+  );
 
   useEffect(() => setPreviewBroken(false), [icon, version]);
 
@@ -84,11 +88,17 @@ export function KeySettings({
         return { type: 'run_command', command: command.trim() };
       case 'open_url':
         return { type: 'open_url', url: url.trim() };
+      case 'open_folder':
+        return { type: 'open_folder', path: folderPath.trim() };
     }
   }
 
   const actionValid =
-    actionType === 'run_command' ? command.trim() !== '' : url.trim() !== '';
+    actionType === 'run_command'
+      ? command.trim() !== ''
+      : actionType === 'open_url'
+        ? url.trim() !== ''
+        : folderPath.trim() !== '';
 
   function handleRemoveFolder() {
     if (
@@ -251,6 +261,26 @@ export function KeySettings({
             </label>
           )}
 
+          {actionType === 'open_folder' && (
+            <label className="flex flex-col gap-1.5 text-[13px] text-text">
+              Folder path
+              <input
+                type="text"
+                className="rounded-sm border border-border bg-bg px-2 py-1.5 font-mono text-sm text-text-h"
+                value={folderPath}
+                placeholder="C:\Users\me\Documents"
+                disabled={busy}
+                onChange={(e) => setFolderPath(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && actionValid) {
+                    e.preventDefault();
+                    run(() => onSetAction(id, buildAction()));
+                  }
+                }}
+              />
+            </label>
+          )}
+
           <div className="flex gap-2">
             <button
               type="button"
@@ -269,6 +299,7 @@ export function KeySettings({
                   onClearAction(id).then(() => {
                     setCommand('');
                     setUrl('');
+                    setFolderPath('');
                   }),
                 )
               }
