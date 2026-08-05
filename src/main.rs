@@ -13,6 +13,7 @@ mod config;
 mod icon_cache;
 mod infer_icon;
 mod push_image;
+mod title;
 
 const ELGATO_VID: u16 = 0x0fd9;
 const STREAMDECK_MK2_PID: u16 = 0x006d;
