@@ -27,7 +27,10 @@ export function KeyTile({
   // Key 0 is reserved on every non-home page: pressing it always goes up a
   // level, regardless of whatever's configured there.
   const isBackKey = id === 0 && path.length > 0;
-  const showImage = !isBackKey && config.icon !== undefined && !broken;
+  // The server falls back to the default folder icon when a folder key has
+  // none of its own set, so folders always have an image to show here.
+  const showImage =
+    !isBackKey && (config.icon !== undefined || config.is_folder) && !broken;
 
   return (
     <button

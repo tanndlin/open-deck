@@ -12,6 +12,11 @@ const ICON_SIZE: u32 = 72;
 /// Matches the icon the web UI overlays on the back key (see KeyTile.tsx).
 const BACK_ARROW_BYTES: &[u8] = include_bytes!("../assets/back_arrow.png");
 
+/// The default icon for a folder key that has no icon of its own configured
+/// — matches the fallback the web UI serves (see `get_key_image` in api.rs
+/// and KeyTile.tsx).
+pub const FOLDER_ICON_BYTES: &[u8] = include_bytes!("../assets/folder.png");
+
 // Image reports are fixed 1024-byte HID output reports:
 // [0x02, 0x07, key, is_last, len_lo, len_hi, page_lo, page_hi] + up to 1016
 // bytes of JPEG payload, zero-padded to fill the report.
@@ -106,6 +111,13 @@ pub fn set_back_arrow_icon(device: &HidDevice, key: u8) -> anyhow::Result<()> {
     set_key_image(device, key, &jpeg)
 }
 
+/// Pushes the default folder icon onto `key`.
+pub fn set_folder_icon(device: &HidDevice, key: u8) -> anyhow::Result<()> {
+    let img = image::load_from_memory(FOLDER_ICON_BYTES)?;
+    let jpeg = encode_key_image(&img)?;
+    set_key_image(device, key, &jpeg)
+}
+
 /// Loads an image from a local file path or, if `source` is an `http(s)`
 /// URL, downloads it (via `cache`) — so icons can point at a link instead of
 /// requiring the image to be saved to disk first.
@@ -131,25 +143,30 @@ pub fn set_key_icon(
     set_key_image(device, key, &jpeg)
 }
 
-/// Loads the icon for each configured key and pushes it to the device. Keys
-/// with no icon (or no entry at all) are left as-is.
+/// Loads the icon for each configured key and pushes it to the device.
+/// Folder keys with no icon of their own fall back to the default folder
+/// icon; other keys with no icon (or no entry at all) are left as-is.
 pub fn load_key_icons(
     device: &HidDevice,
     keys: &KeyConfigMap,
     cache: &IconCache,
 ) -> anyhow::Result<()> {
     for (&key, config) in keys {
-        let Some(path) = &config.icon else { continue };
-
         if key >= KEY_COUNT {
             eprintln!("Skipping key {key}: out of range (device has {KEY_COUNT} keys)");
             continue;
         }
 
-        set_key_icon(device, key, path, cache)?;
+        match &config.icon {
+            Some(path) => {
+                set_key_icon(device, key, path, cache)?;
 
-        #[cfg(debug_assertions)]
-        println!("Set key {key} image from {path}");
+                #[cfg(debug_assertions)]
+                println!("Set key {key} image from {path}");
+            }
+            None if config.folder.is_some() => set_folder_icon(device, key)?,
+            None => {}
+        }
     }
     Ok(())
 }

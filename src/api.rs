@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::action::Action;
 use crate::config::{KeyConfig, KeyConfigMap, page_at, page_at_mut, save_key_config};
 use crate::icon_cache::IconCache;
-use crate::push_image::{clear_key_image, set_key_icon};
+use crate::push_image::{FOLDER_ICON_BYTES, clear_key_image, set_key_icon};
 use crate::{AppState, KEY_COUNT, switch_to_path};
 
 type ApiError = (StatusCode, String);
@@ -205,12 +205,21 @@ async fn get_key_image(
     Path((raw_path, id)): Path<(String, u8)>,
 ) -> Result<Response, ApiError> {
     let path = parse_page_path(&raw_path)?;
-    let icon = {
+    let (icon, is_folder) = {
         let root = state.root.lock().unwrap();
         let page = page_at(&root, &path).ok_or_else(|| page_not_found(&raw_path))?;
-        page.get(&id).and_then(|c| c.icon.clone())
+        let config = page.get(&id);
+        (
+            config.and_then(|c| c.icon.clone()),
+            config.is_some_and(|c| c.folder.is_some()),
+        )
     };
-    let icon = icon.ok_or_else(|| (StatusCode::NOT_FOUND, format!("no icon set for key {id}")))?;
+    let Some(icon) = icon else {
+        if is_folder {
+            return Ok(([(header::CONTENT_TYPE, "image/png")], FOLDER_ICON_BYTES).into_response());
+        }
+        return Err((StatusCode::NOT_FOUND, format!("no icon set for key {id}")));
+    };
 
     if icon.starts_with("http://") || icon.starts_with("https://") {
         let cache_state = Arc::clone(&state);
