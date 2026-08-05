@@ -25,12 +25,34 @@ impl IconCache {
     }
 
     /// Returns the raw bytes at `url`, downloading them only on the first
-    /// request for that URL.
+    /// request for that URL. If the request fails and `url` looks like a
+    /// guessed `/favicon.ico` path, falls back to re-inferring the site's
+    /// real favicon (see [`crate::infer_icon::recover_favicon`]) before
+    /// giving up — this is what lets a manually-typed favicon guess recover
+    /// on its own for sites (e.g. Cloudflare-protected wikis) that block the
+    /// conventional path. Either way, the result is cached under the
+    /// originally requested `url`.
     pub fn get_or_fetch(&self, url: &str) -> Result<Arc<CachedIcon>, String> {
         if let Some(icon) = self.urls.lock().unwrap().get(url) {
             return Ok(Arc::clone(icon));
         }
 
+        let icon = match Self::fetch(url) {
+            Ok(icon) => icon,
+            Err(e) => crate::infer_icon::recover_favicon(url)
+                .and_then(|recovered| Self::fetch(&recovered).ok())
+                .ok_or(e)?,
+        };
+
+        let icon = Arc::new(icon);
+        self.urls
+            .lock()
+            .unwrap()
+            .insert(url.to_string(), Arc::clone(&icon));
+        Ok(icon)
+    }
+
+    fn fetch(url: &str) -> Result<CachedIcon, String> {
         let mut response = ureq::get(url)
             .call()
             .map_err(|e| format!("failed to fetch icon: {e}"))?;
@@ -47,12 +69,7 @@ impl IconCache {
             .read_to_vec()
             .map_err(|e| format!("failed to read icon: {e}"))?;
 
-        let icon = Arc::new(CachedIcon { bytes, mime });
-        self.urls
-            .lock()
-            .unwrap()
-            .insert(url.to_string(), Arc::clone(&icon));
-        Ok(icon)
+        Ok(CachedIcon { bytes, mime })
     }
 
     /// Returns the encoded JPEG bytes for `key`, calling `encode` only on the

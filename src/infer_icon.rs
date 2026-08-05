@@ -19,6 +19,32 @@ pub fn infer_icon(action: &Action, cache_dir: &Path) -> Option<String> {
     }
 }
 
+/// Recovers from a failed fetch of `url` when it looks like a guessed
+/// `/favicon.ico` path (whether from an older version of [`favicon_url`], or
+/// typed in by hand) by re-running the same favicon inference against its
+/// origin. Returns `None` if `url` doesn't look like such a guess, or
+/// nothing better than `url` itself could be found — callers should treat
+/// either case as "the original failure stands."
+pub fn recover_favicon(url: &str) -> Option<String> {
+    if !looks_like_favicon_guess(url) {
+        return None;
+    }
+    let uri: axum::http::Uri = url.parse().ok()?;
+    let scheme = uri.scheme_str()?;
+    let authority = uri.authority()?;
+    let recovered = favicon_url(&format!("{scheme}://{authority}/"))?;
+    (recovered != url).then_some(recovered)
+}
+
+/// Whether `url`'s path is exactly the conventional favicon guess
+/// (`/favicon.ico`) rather than a specific image someone picked
+/// deliberately — used to scope [`recover_favicon`] to that narrow case
+/// instead of silently substituting an unrelated icon for any broken URL.
+fn looks_like_favicon_guess(url: &str) -> bool {
+    url::Url::parse(url)
+        .is_ok_and(|u| u.query().is_none() && u.path().eq_ignore_ascii_case("/favicon.ico"))
+}
+
 /// Only the `<head>` (where favicon `<link>`s live) needs to be scanned, so
 /// a page's often much larger body never has to be downloaded.
 const MAX_HTML_SCAN_BYTES: usize = 256 * 1024;
@@ -299,6 +325,25 @@ mod tests {
             Some("https://icons.duckduckgo.com/ip3/example.com.ico".to_string())
         );
         assert_eq!(favicon_service_url("not a url"), None);
+    }
+
+    #[test]
+    fn looks_like_favicon_guess_matches_only_a_bare_favicon_ico_path() {
+        assert!(looks_like_favicon_guess("https://example.com/favicon.ico"));
+        assert!(looks_like_favicon_guess("https://example.com/FAVICON.ICO"));
+        assert!(!looks_like_favicon_guess(
+            "https://example.com/path/favicon.ico"
+        ));
+        assert!(!looks_like_favicon_guess(
+            "https://example.com/favicon.ico?v=1"
+        ));
+        assert!(!looks_like_favicon_guess("https://example.com/logo.png"));
+        assert!(!looks_like_favicon_guess("not a url"));
+    }
+
+    #[test]
+    fn recover_favicon_ignores_urls_that_dont_look_like_a_guess() {
+        assert_eq!(recover_favicon("https://example.com/logo.png"), None);
     }
 
     #[test]
