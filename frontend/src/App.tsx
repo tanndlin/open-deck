@@ -11,6 +11,7 @@ import {
   moveKey,
   setKeyAction,
   setKeyIcon,
+  uploadKeyIcon,
   type KeyAction,
   type KeyConfig,
   type KeyMap,
@@ -235,6 +236,18 @@ function App() {
     clearHoverTimer();
   }
 
+  async function handleDropFile(id: number, file: File) {
+    setBusy(true);
+    try {
+      await uploadKeyIcon(path, id, file);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleDropKey(id: number) {
     const source = dragSource;
     setDragSource(null);
@@ -316,6 +329,7 @@ function App() {
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
                 onDropKey={handleDropKey}
+                onDropFile={handleDropFile}
                 onHoverFolder={handleHoverFolder}
                 onHoverBack={handleHoverBack}
                 onHoverCancel={handleHoverCancel}

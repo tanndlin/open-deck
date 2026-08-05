@@ -81,6 +81,30 @@ export async function setKeyIcon(
   );
 }
 
+/**
+ * Uploads a dropped image file's bytes and sets it as key `id`'s icon.
+ * Browsers don't expose a dragged file's real filesystem path, so the file
+ * is copied to the server instead of being referenced by path.
+ */
+export async function uploadKeyIcon(
+  path: PagePath,
+  id: number,
+  file: File,
+): Promise<void> {
+  await checkOk(
+    await fetch(
+      `/api/pages/${formatPagePath(path)}/keys/${id}/icon/upload?filename=${encodeURIComponent(
+        file.name,
+      )}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: file,
+      },
+    ),
+  );
+}
+
 export async function clearKeyIcon(path: PagePath, id: number): Promise<void> {
   await checkOk(
     await fetch(`/api/pages/${formatPagePath(path)}/keys/${id}/icon`, {

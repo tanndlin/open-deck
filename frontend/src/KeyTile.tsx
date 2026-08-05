@@ -12,9 +12,18 @@ interface KeyTileProps {
   onDragStart: (id: number) => void;
   onDragEnd: () => void;
   onDropKey: (id: number) => void;
+  onDropFile: (id: number, file: File) => void;
   onHoverFolder: (id: number) => void;
   onHoverBack: () => void;
   onHoverCancel: () => void;
+}
+
+const IMAGE_FILE_NAME_RE = /\.(png|jpe?g|gif|bmp|webp|ico|svg)$/i;
+
+/** Browsers don't always fill in `File.type` for less common image formats
+ * (e.g. `.ico`), so fall back to checking the extension. */
+function isImageFile(file: File): boolean {
+  return file.type.startsWith('image/') || IMAGE_FILE_NAME_RE.test(file.name);
 }
 
 /** Every key — folder or not, on every page — renders through this exact same tile. */
@@ -28,6 +37,7 @@ export function KeyTile({
   onDragStart,
   onDragEnd,
   onDropKey,
+  onDropFile,
   onHoverFolder,
   onHoverBack,
   onHoverCancel,
@@ -74,7 +84,13 @@ export function KeyTile({
         e.preventDefault();
         setDragOver(false);
         onHoverCancel();
-        onDropKey(id);
+        if (isBackKey) return;
+        const file = e.dataTransfer.files[0];
+        if (file && isImageFile(file)) {
+          onDropFile(id, file);
+        } else {
+          onDropKey(id);
+        }
       }}
     >
       <span className="pointer-events-none absolute top-1 left-1.5 z-1 font-mono text-xs text-text-h opacity-60">

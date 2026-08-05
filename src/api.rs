@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    body::Bytes,
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post, put},
@@ -18,6 +19,10 @@ use crate::{AppState, KEY_COUNT, switch_to_path};
 
 type ApiError = (StatusCode, String);
 
+/// Generous enough for any reasonable key icon image, well past axum's 2MB
+/// default request body limit.
+const UPLOAD_ICON_MAX_BYTES: usize = 25 * 1024 * 1024;
+
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/key-count", get(key_count))
@@ -30,6 +35,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(get_key_icon)
                 .put(set_key_icon_route)
                 .delete(clear_key_icon),
+        )
+        .route(
+            "/api/pages/{path}/keys/{id}/icon/upload",
+            put(upload_key_icon).layer(DefaultBodyLimit::max(UPLOAD_ICON_MAX_BYTES)),
         )
         .route(
             "/api/pages/{path}/keys/{id}/action",
@@ -303,6 +312,56 @@ async fn set_key_icon_route(
     check_key_range(id)?;
     let path = parse_page_path(&raw_path)?;
     apply_icon(&state, &path, id, req.path).await?;
+    Ok(StatusCode::OK)
+}
+
+#[derive(Deserialize)]
+struct UploadIconQuery {
+    /// The original filename from the browser's `File`, used only to recover
+    /// its extension (so the saved copy keeps a correct content type).
+    filename: String,
+}
+
+/// Saves a dropped/uploaded icon image under `<config dir>/icons/`, named by
+/// a hash of its contents (so re-uploading the same image reuses the same
+/// file), and sets it as key `id`'s icon. Used by the web UI's
+/// drag-a-file-from-the-desktop icon picker — browsers don't expose a
+/// dragged file's real filesystem path, so the bytes have to be copied in.
+async fn upload_key_icon(
+    State(state): State<Arc<AppState>>,
+    Path((raw_path, id)): Path<(String, u8)>,
+    Query(query): Query<UploadIconQuery>,
+    body: Bytes,
+) -> Result<StatusCode, ApiError> {
+    check_key_range(id)?;
+    let path = parse_page_path(&raw_path)?;
+
+    let icons_dir = std::path::Path::new(&state.config_path).with_file_name("icons");
+    tokio::fs::create_dir_all(&icons_dir).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to create icons directory: {e}"),
+        )
+    })?;
+
+    let ext = std::path::Path::new(&query.filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| e.chars().all(|c| c.is_ascii_alphanumeric()))
+        .unwrap_or("png");
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&body[..], &mut hasher);
+    let out_path = icons_dir.join(format!("{:x}.{ext}", std::hash::Hasher::finish(&hasher)));
+
+    tokio::fs::write(&out_path, &body).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to save icon: {e}"),
+        )
+    })?;
+
+    apply_icon(&state, &path, id, out_path.to_string_lossy().into_owned()).await?;
     Ok(StatusCode::OK)
 }
 
