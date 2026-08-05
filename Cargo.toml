@@ -19,3 +19,6 @@ url = "2.5.8"
 
 [target."cfg(windows)".dependencies]
 windows-icons = "0.3.0"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }

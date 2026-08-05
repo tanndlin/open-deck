@@ -45,4 +45,9 @@ if [ "$touches_rust" -gt 0 ] || [ "$touches_frontend" -gt 0 ]; then
     cargo build
 fi
 
+if [ "$touches_rust" -gt 0 ]; then
+    echo "==> Linting Rust (clippy)"
+    cargo clippy --all-targets -- -D warnings -D clippy::pedantic
+fi
+
 echo "pre-commit checks passed."

@@ -8,8 +8,7 @@ pub fn infer_icon(action: &Action, cache_dir: &Path) -> Option<String> {
     match action {
         Action::OpenUrl { url } => favicon_url(url),
         Action::RunCommand { command } => command_icon(command, cache_dir),
-        Action::OpenFolder { .. } => None,
-        Action::TypeText { .. } | Action::Hotkey { .. } => None,
+        Action::OpenFolder { .. } | Action::TypeText { .. } | Action::Hotkey { .. } => None,
     }
 }
 
@@ -36,7 +35,7 @@ fn looks_like_favicon_guess(url: &str) -> bool {
 /// a page's often much larger body never has to be downloaded.
 const MAX_HTML_SCAN_BYTES: usize = 256 * 1024;
 
-/// Tries, in order: the site's declared favicon, DuckDuckGo's favicon lookup
+/// Tries, in order: the site's declared favicon, `DuckDuckGo`'s favicon lookup
 /// (works even behind e.g. Cloudflare), then the conventional `/favicon.ico`.
 fn favicon_url(url: &str) -> Option<String> {
     let fallback = origin_favicon(url)?;
@@ -164,24 +163,21 @@ fn parse_attrs(tag_inner: &str) -> std::collections::HashMap<String, String> {
             i += 1;
         }
 
-        let value = match bytes.get(i) {
-            Some(&quote @ (b'"' | b'\'')) => {
+        let value = if let Some(&quote @ (b'"' | b'\'')) = bytes.get(i) {
+            i += 1;
+            let value_start = i;
+            while i < bytes.len() && bytes[i] != quote {
                 i += 1;
-                let value_start = i;
-                while i < bytes.len() && bytes[i] != quote {
-                    i += 1;
-                }
-                let value = &tag_inner[value_start..i];
+            }
+            let value = &tag_inner[value_start..i];
+            i += 1;
+            value
+        } else {
+            let value_start = i;
+            while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
                 i += 1;
-                value
             }
-            _ => {
-                let value_start = i;
-                while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
-                    i += 1;
-                }
-                &tag_inner[value_start..i]
-            }
+            &tag_inner[value_start..i]
         };
         attrs.insert(name.to_lowercase(), value.to_string());
     }
@@ -329,7 +325,7 @@ mod tests {
 
     #[test]
     fn find_icon_href_falls_back_to_apple_touch_icon() {
-        let html = r#"<link rel='apple-touch-icon' href='/apple-touch.png'>"#;
+        let html = r"<link rel='apple-touch-icon' href='/apple-touch.png'>";
         assert_eq!(find_icon_href(html), Some("/apple-touch.png".to_string()));
     }
 
