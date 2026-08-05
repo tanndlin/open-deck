@@ -22,5 +22,37 @@
   },
   "[html]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
-  }
+  },
+  "restoreTerminals.terminals": [
+    {
+      "splitTerminals": [
+        {
+          "name": "Frontend Server",
+          "commands": [
+            "cd frontend",
+            "npm run dev"
+          ],
+        },
+        {
+          "name": "Backend Server",
+          "commands": [
+            "cargo watch -w src -x check -x run"
+          ]
+        }
+      ],
+    },
+    {
+      "splitTerminals": [
+        {
+          "name": "Git",
+          "commands": [
+            "git status",
+          ],
+        },
+        {
+          "name": "Other",
+        },
+      ],
+    }
+  ]
 }
