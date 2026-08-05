@@ -31,17 +31,10 @@ fn looks_like_favicon_guess(url: &str) -> bool {
         .is_ok_and(|u| u.query().is_none() && u.path().eq_ignore_ascii_case("/favicon.ico"))
 }
 
-/// Only the `<head>` (where favicon `<link>`s live) needs to be scanned, so
-/// a page's often much larger body never has to be downloaded.
-const MAX_HTML_SCAN_BYTES: usize = 256 * 1024;
-
 /// Tries, in order: the site's declared favicon, `DuckDuckGo`'s favicon lookup
 /// (works even behind e.g. Cloudflare), then the conventional `/favicon.ico`.
 fn favicon_url(url: &str) -> Option<String> {
     let fallback = origin_favicon(url)?;
-    if let Some(icon) = declared_favicon(url) {
-        return Some(icon);
-    }
     Some(favicon_service_url(url).unwrap_or(fallback))
 }
 
@@ -61,128 +54,6 @@ fn origin_favicon(url: &str) -> Option<String> {
     }
     let authority = uri.authority()?;
     Some(format!("{scheme}://{authority}/favicon.ico"))
-}
-
-/// Returns `None` on any failure; callers should fall back to [`origin_favicon`].
-fn declared_favicon(url: &str) -> Option<String> {
-    let mut response = ureq::get(url).call().ok()?;
-    let mut bytes = Vec::new();
-    let reader = response.body_mut().as_reader();
-    std::io::Read::read_to_end(
-        &mut std::io::Read::take(reader, MAX_HTML_SCAN_BYTES as u64),
-        &mut bytes,
-    )
-    .ok()?;
-    let html = String::from_utf8_lossy(&bytes);
-
-    let href = find_icon_href(&html)?;
-    let base = url::Url::parse(url).ok()?;
-    base.join(&href).ok().map(String::from)
-}
-
-/// Prefers an exact `rel="icon"`/`"shortcut icon"`, else the first `rel` containing `"icon"`.
-fn find_icon_href(html: &str) -> Option<String> {
-    let mut fallback: Option<String> = None;
-    for tag in find_tags(html, "link") {
-        let attrs = parse_attrs(tag);
-        let Some(rel) = attrs.get("rel").map(|r| r.to_lowercase()) else {
-            continue;
-        };
-        let Some(href) = attrs.get("href").filter(|h| !h.is_empty()) else {
-            continue;
-        };
-        if rel == "icon" || rel == "shortcut icon" {
-            return Some(href.clone());
-        }
-        if fallback.is_none() && rel.contains("icon") {
-            fallback = Some(href.clone());
-        }
-    }
-    fallback
-}
-
-/// Returns each `<name ...>` tag's inner text (without the surrounding `<`/`>`), case-insensitively.
-fn find_tags<'a>(html: &'a str, name: &str) -> Vec<&'a str> {
-    let lower = html.to_lowercase();
-    let open = format!("<{name}");
-    let mut tags = Vec::new();
-    let mut pos = 0;
-    while let Some(rel_start) = lower[pos..].find(open.as_str()) {
-        let start = pos + rel_start;
-        let after = start + open.len();
-        let boundary_ok = lower
-            .as_bytes()
-            .get(after)
-            .is_none_or(|&c| c.is_ascii_whitespace() || c == b'>' || c == b'/');
-        let Some(rel_end) = lower[after..].find('>') else {
-            break;
-        };
-        let end = after + rel_end;
-        if boundary_ok {
-            tags.push(&html[start + 1..end]);
-        }
-        pos = end + 1;
-    }
-    tags
-}
-
-/// Parses `name="value"`, `name='value'`, or bare `name` attributes from a tag's inner text.
-fn parse_attrs(tag_inner: &str) -> std::collections::HashMap<String, String> {
-    let mut attrs = std::collections::HashMap::new();
-    let bytes = tag_inner.as_bytes();
-    let mut i = 0;
-
-    // Skip the tag name itself.
-    while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
-        i += 1;
-    }
-
-    while i < bytes.len() {
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        let name_start = i;
-        while i < bytes.len() && bytes[i] != b'=' && !bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        let name = tag_inner[name_start..i].trim_end_matches('/');
-        if name.is_empty() {
-            i += 1;
-            continue;
-        }
-
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        if bytes.get(i) != Some(&b'=') {
-            attrs.insert(name.to_lowercase(), String::new());
-            continue;
-        }
-        i += 1;
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-
-        let value = if let Some(&quote @ (b'"' | b'\'')) = bytes.get(i) {
-            i += 1;
-            let value_start = i;
-            while i < bytes.len() && bytes[i] != quote {
-                i += 1;
-            }
-            let value = &tag_inner[value_start..i];
-            i += 1;
-            value
-        } else {
-            let value_start = i;
-            while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            &tag_inner[value_start..i]
-        };
-        attrs.insert(name.to_lowercase(), value.to_string());
-    }
-
-    attrs
 }
 
 /// The first token of `command`, respecting a leading quoted path.
@@ -303,51 +174,5 @@ mod tests {
     #[test]
     fn recover_favicon_ignores_urls_that_dont_look_like_a_guess() {
         assert_eq!(recover_favicon("https://example.com/logo.png"), None);
-    }
-
-    #[test]
-    fn find_icon_href_prefers_exact_icon_rel() {
-        let html = r#"
-            <html><head>
-            <link rel="apple-touch-icon" href="/apple.png">
-            <link rel="stylesheet" href="/site.css">
-            <link rel="icon" href="/favicon.png" type="image/png">
-            </head></html>
-        "#;
-        assert_eq!(find_icon_href(html), Some("/favicon.png".to_string()));
-    }
-
-    #[test]
-    fn find_icon_href_matches_shortcut_icon_and_is_case_insensitive() {
-        let html = r#"<LINK REL="Shortcut Icon" HREF="/shortcut.ico">"#;
-        assert_eq!(find_icon_href(html), Some("/shortcut.ico".to_string()));
-    }
-
-    #[test]
-    fn find_icon_href_falls_back_to_apple_touch_icon() {
-        let html = r"<link rel='apple-touch-icon' href='/apple-touch.png'>";
-        assert_eq!(find_icon_href(html), Some("/apple-touch.png".to_string()));
-    }
-
-    #[test]
-    fn find_icon_href_returns_none_without_a_matching_link() {
-        let html = r#"<link rel="stylesheet" href="/site.css">"#;
-        assert_eq!(find_icon_href(html), None);
-    }
-
-    #[test]
-    fn find_icon_href_ignores_tags_with_icon_as_a_prefix() {
-        let html = r#"<linkage rel="icon" href="/nope.png"><link rel="icon" href="/yes.png">"#;
-        assert_eq!(find_icon_href(html), Some("/yes.png".to_string()));
-    }
-
-    #[test]
-    fn declared_favicon_resolves_relative_href_against_page_url() {
-        let href = find_icon_href(r#"<link rel="icon" href="../static/icon.png">"#).unwrap();
-        let base = url::Url::parse("https://example.com/a/b/page").unwrap();
-        assert_eq!(
-            base.join(&href).unwrap().to_string(),
-            "https://example.com/a/static/icon.png"
-        );
     }
 }
