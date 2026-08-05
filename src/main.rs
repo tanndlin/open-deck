@@ -4,7 +4,7 @@ use hidapi::{HidApi, HidDevice};
 
 use crate::config::{KeyConfigMap, load_key_config, page_at};
 use crate::icon_cache::IconCache;
-use crate::push_image::{clear_all_keys, load_key_icons};
+use crate::push_image::{clear_all_keys, load_key_icons, set_back_arrow_icon};
 
 mod action;
 mod api;
@@ -49,6 +49,11 @@ pub(crate) fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()
     let device = state.device.lock().unwrap();
     clear_all_keys(&device)?;
     load_key_icons(&device, page, &state.icon_cache)?;
+    // Every non-home page reserves this key to go up a level, regardless of
+    // whatever's configured for it — matches KeyTile.tsx's isBackKey.
+    if !path.is_empty() {
+        set_back_arrow_icon(&device, BACK_KEY)?;
+    }
     drop(root);
     drop(device);
 

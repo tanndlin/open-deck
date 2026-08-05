@@ -9,6 +9,9 @@ use crate::icon_cache::IconCache;
 // panel is physically mounted behind each button.
 const ICON_SIZE: u32 = 72;
 
+/// Matches the icon the web UI overlays on the back key (see KeyTile.tsx).
+const BACK_ARROW_BYTES: &[u8] = include_bytes!("../assets/back_arrow.png");
+
 // Image reports are fixed 1024-byte HID output reports:
 // [0x02, 0x07, key, is_last, len_lo, len_hi, page_lo, page_hi] + up to 1016
 // bytes of JPEG payload, zero-padded to fill the report.
@@ -93,6 +96,14 @@ pub fn clear_all_keys(device: &HidDevice) -> anyhow::Result<()> {
         clear_key_image(device, key)?;
     }
     Ok(())
+}
+
+/// Pushes the "go up a level" arrow onto `key`, overriding whatever icon
+/// (if any) is configured there.
+pub fn set_back_arrow_icon(device: &HidDevice, key: u8) -> anyhow::Result<()> {
+    let img = image::load_from_memory(BACK_ARROW_BYTES)?;
+    let jpeg = encode_key_image(&img)?;
+    set_key_image(device, key, &jpeg)
 }
 
 /// Loads an image from a local file path or, if `source` is an `http(s)`
