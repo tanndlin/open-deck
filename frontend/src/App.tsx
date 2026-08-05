@@ -337,13 +337,15 @@ function App() {
                 version={version}
                 selected={selectedKey === id}
                 onClick={handleTileClick}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                onDropKey={handleDropKey}
-                onDropFile={handleDropFile}
-                onHoverFolder={handleHoverFolder}
-                onHoverBack={handleHoverBack}
-                onHoverCancel={handleHoverCancel}
+                drag={{
+                  onDragStart: handleDragStart,
+                  onDragEnd: handleDragEnd,
+                  onDropKey: handleDropKey,
+                  onDropFile: handleDropFile,
+                  onHoverFolder: handleHoverFolder,
+                  onHoverBack: handleHoverBack,
+                  onHoverCancel: handleHoverCancel,
+                }}
               />
             ))}
           </div>
@@ -356,15 +358,17 @@ function App() {
               config={keys[selectedKey] ?? { is_folder: false }}
               version={version}
               onClose={() => setSelectedKey(null)}
-              onSetIcon={handleSetIcon}
-              onClearIcon={handleClearIcon}
-              onSetTitle={handleSetTitle}
-              onClearTitle={handleClearTitle}
-              onSetAction={handleSetAction}
-              onClearAction={handleClearAction}
-              onMakeFolder={handleMakeFolder}
-              onRemoveFolder={handleRemoveFolder}
-              onOpenFolder={handleOpenFolder}
+              actions={{
+                onSetIcon: handleSetIcon,
+                onClearIcon: handleClearIcon,
+                onSetTitle: handleSetTitle,
+                onClearTitle: handleClearTitle,
+                onSetAction: handleSetAction,
+                onClearAction: handleClearAction,
+                onMakeFolder: handleMakeFolder,
+                onRemoveFolder: handleRemoveFolder,
+                onOpenFolder: handleOpenFolder,
+              }}
             />
           )}
         </div>
