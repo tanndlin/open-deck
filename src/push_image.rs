@@ -32,8 +32,17 @@ const IMAGE_REPORT_HEADER_LEN: usize = 8;
 const IMAGE_REPORT_PAYLOAD_LEN: usize = IMAGE_REPORT_LEN - IMAGE_REPORT_HEADER_LEN;
 
 fn encode_key_image(image: &DynamicImage) -> anyhow::Result<Vec<u8>> {
-    let image = image.resize_exact(ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3);
-    let image = image.fliph().flipv();
+    // Scale to fit within the key's bounds, keeping the aspect ratio (unlike
+    // `resize_exact`, which would stretch a non-square image), then center
+    // the result on a square canvas so the rest of the key is padded rather
+    // than cropped.
+    let fitted = image.resize(ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3);
+    let mut canvas = image::RgbaImage::new(ICON_SIZE, ICON_SIZE);
+    let x_offset = i64::from((ICON_SIZE - fitted.width()) / 2);
+    let y_offset = i64::from((ICON_SIZE - fitted.height()) / 2);
+    image::imageops::overlay(&mut canvas, &fitted.to_rgba8(), x_offset, y_offset);
+
+    let image = DynamicImage::ImageRgba8(canvas).fliph().flipv();
 
     let rgba = image.into_rgba8();
     let mut rgb = RgbImage::new(ICON_SIZE, ICON_SIZE);
@@ -179,5 +188,32 @@ pub fn load_key_icons(device: &HidDevice, keys: &KeyConfigMap, cache: &IconCache
         if let Err(e) = result {
             eprintln!("Failed to set icon for key {key}: {e}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use image::{Rgba, RgbaImage};
+
+    use super::*;
+
+    #[test]
+    fn encode_key_image_fits_wide_images_instead_of_stretching() {
+        // A wide, fully opaque red rectangle: fitting it into a 72x72 key
+        // should shrink it down to 72x18 and pad above/below, not stretch it
+        // to fill the whole square.
+        let wide = DynamicImage::ImageRgba8(RgbaImage::from_pixel(200, 50, Rgba([255, 0, 0, 255])));
+        let jpeg = encode_key_image(&wide).unwrap();
+        let decoded = image::load_from_memory(&jpeg).unwrap().into_rgb8();
+
+        // Corners fall in the padded area, so they should stay black rather
+        // than the stretched-to-fill red a plain resize_exact would produce.
+        assert_eq!(*decoded.get_pixel(0, 0), Rgb([0, 0, 0]));
+        assert_eq!(*decoded.get_pixel(ICON_SIZE - 1, 0), Rgb([0, 0, 0]));
+        assert_eq!(*decoded.get_pixel(0, ICON_SIZE - 1), Rgb([0, 0, 0]));
+
+        // The center falls inside the fitted band, so it should still be red.
+        let center = decoded.get_pixel(ICON_SIZE / 2, ICON_SIZE / 2);
+        assert!(center[0] > 200 && center[1] < 50 && center[2] < 50);
     }
 }

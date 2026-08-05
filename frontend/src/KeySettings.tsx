@@ -118,7 +118,7 @@ export function KeySettings({
       <div className="mx-auto flex aspect-square w-35 items-center justify-center overflow-hidden rounded-[10px] border border-border bg-code-bg">
         {(icon !== undefined || isFolder) && !previewBroken ? (
           <img
-            className="h-full w-full object-cover"
+            className="h-full w-full object-contain"
             src={keyImageUrl(path, id, version)}
             alt={`Key ${id}`}
             onError={() => setPreviewBroken(true)}

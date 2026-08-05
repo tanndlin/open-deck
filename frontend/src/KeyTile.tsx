@@ -88,7 +88,7 @@ export function KeyTile({
         />
       ) : showImage ? (
         <img
-          className="pointer-events-none block h-full w-full object-fill"
+          className="pointer-events-none block h-full w-full object-contain"
           src={keyImageUrl(path, id, version)}
           alt={`Key ${id}`}
           onError={() => setBroken(true)}
