@@ -254,22 +254,23 @@ struct SetIconRequest {
     path: String,
 }
 
-async fn set_key_icon_route(
-    State(state): State<Arc<AppState>>,
-    Path((raw_path, id)): Path<(String, u8)>,
-    Json(req): Json<SetIconRequest>,
-) -> Result<StatusCode, ApiError> {
-    check_key_range(id)?;
-    let path = parse_page_path(&raw_path)?;
-
+/// Pushes `icon` to the device (if `path` is the one currently shown) and
+/// persists it as key `id`'s icon. Shared by the icon-setting route and the
+/// favicon auto-fill in [`set_key_action`].
+async fn apply_icon(
+    state: &Arc<AppState>,
+    path: &[u8],
+    id: u8,
+    icon: String,
+) -> Result<(), ApiError> {
     // Only push to the physical device if the edited page is the one
     // currently shown — otherwise it'll be picked up next time it's
     // activated.
-    if path == *state.current_path.lock().unwrap() {
+    if path == state.current_path.lock().unwrap().as_slice() {
         // The icon may be an http(s) URL, so this can block on network
         // I/O — keep it off the async runtime (see activate_page).
-        let icon_state = Arc::clone(&state);
-        let icon_path = req.path.clone();
+        let icon_state = Arc::clone(state);
+        let icon_path = icon.clone();
         tokio::task::spawn_blocking(move || {
             let device = icon_state.device.lock().unwrap();
             set_key_icon(&device, id, &icon_path, &icon_state.icon_cache)
@@ -285,12 +286,35 @@ async fn set_key_icon_route(
     }
 
     let mut root = state.root.lock().unwrap();
-    let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
-    page.entry(id).or_default().icon = Some(req.path);
+    let page =
+        page_at_mut(&mut root, path).ok_or_else(|| page_not_found(&format_page_path(path)))?;
+    page.entry(id).or_default().icon = Some(icon);
     drop(root);
 
-    persist(&state)?;
+    persist(state)
+}
+
+async fn set_key_icon_route(
+    State(state): State<Arc<AppState>>,
+    Path((raw_path, id)): Path<(String, u8)>,
+    Json(req): Json<SetIconRequest>,
+) -> Result<StatusCode, ApiError> {
+    check_key_range(id)?;
+    let path = parse_page_path(&raw_path)?;
+    apply_icon(&state, &path, id, req.path).await?;
     Ok(StatusCode::OK)
+}
+
+/// Derives the conventional favicon location for `url`: `/favicon.ico` at
+/// its origin. Returns `None` if `url` isn't an absolute `http(s)` URL.
+fn favicon_url(url: &str) -> Option<String> {
+    let uri: axum::http::Uri = url.parse().ok()?;
+    let scheme = uri.scheme_str()?;
+    if scheme != "http" && scheme != "https" {
+        return None;
+    }
+    let authority = uri.authority()?;
+    Some(format!("{scheme}://{authority}/favicon.ico"))
 }
 
 async fn clear_key_icon(
@@ -342,19 +366,33 @@ async fn set_key_action(
     check_key_range(id)?;
     let path = parse_page_path(&raw_path)?;
 
-    let mut root = state.root.lock().unwrap();
-    let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
-    let config = page.entry(id).or_default();
-    if config.folder.is_some() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "key is a folder; remove the folder before setting an action".into(),
-        ));
-    }
-    config.action = Some(action);
-    drop(root);
+    let has_icon = {
+        let mut root = state.root.lock().unwrap();
+        let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
+        let config = page.entry(id).or_default();
+        if config.folder.is_some() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "key is a folder; remove the folder before setting an action".into(),
+            ));
+        }
+        config.action = Some(action.clone());
+        config.icon.is_some()
+    };
 
     persist(&state)?;
+
+    // Best-effort: a webpage key with no icon of its own gets the site's
+    // favicon. Failure here (bad URL, no favicon.ico, network error)
+    // shouldn't fail the request — the action is already saved.
+    if !has_icon
+        && let Action::OpenUrl { url } = &action
+        && let Some(favicon) = favicon_url(url)
+        && let Err((_, e)) = apply_icon(&state, &path, id, favicon).await
+    {
+        eprintln!("Failed to set favicon for key {id}: {e}");
+    }
+
     Ok(StatusCode::OK)
 }
 
