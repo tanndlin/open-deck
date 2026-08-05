@@ -4,7 +4,7 @@ use hidapi::{HidApi, HidDevice};
 
 use crate::config::{KeyConfigMap, load_key_config, page_at};
 use crate::icon_cache::IconCache;
-use crate::push_image::{clear_all_keys, load_key_icons, set_back_arrow_icon};
+use crate::push_image::{clear_all_keys, load_key_icons, precache_all_icons, set_back_arrow_icon};
 
 mod action;
 mod api;
@@ -97,6 +97,15 @@ async fn main() -> anyhow::Result<()> {
 
     let poll_state = state.clone();
     std::thread::spawn(move || poll_keys(&poll_state));
+
+    // Warms the cache for icons outside the home page (nested folders, plus
+    // anything on the home page that failed above) so opening a folder later
+    // doesn't stall on a fetch. Runs off the startup path entirely.
+    let precache_state = state.clone();
+    std::thread::spawn(move || {
+        let root = precache_state.root.lock().unwrap().clone();
+        precache_all_icons(&root, &precache_state.icon_cache);
+    });
 
     let router = api::router(state).fallback(assets::static_handler);
 

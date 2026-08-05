@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use hidapi::HidDevice;
 use image::{ColorType, DynamicImage, Rgb, RgbImage, codecs::jpeg::JpegEncoder};
 
@@ -142,6 +144,15 @@ pub fn set_back_arrow_icon(device: &HidDevice, key: u8, cache: &IconCache) -> an
     set_key_image(device, key, &jpeg)
 }
 
+/// Encodes (or fetches the cached encoding of) the default folder icon,
+/// without pushing it to any key.
+fn encoded_folder_icon(title: Option<&str>, cache: &IconCache) -> anyhow::Result<Arc<Vec<u8>>> {
+    let cache_key = with_title_suffix(FOLDER_ICON_CACHE_KEY, title);
+    cache.get_image(&cache_key, || {
+        encode_key_image(&image::load_from_memory(FOLDER_ICON_BYTES)?, title)
+    })
+}
+
 /// Pushes the default folder icon onto `key`, still showing `title` if set.
 pub fn set_folder_icon(
     device: &HidDevice,
@@ -149,25 +160,21 @@ pub fn set_folder_icon(
     title: Option<&str>,
     cache: &IconCache,
 ) -> anyhow::Result<()> {
-    let cache_key = with_title_suffix(FOLDER_ICON_CACHE_KEY, title);
-    let jpeg = cache.get_image(&cache_key, || {
-        encode_key_image(&image::load_from_memory(FOLDER_ICON_BYTES)?, title)
-    })?;
+    let jpeg = encoded_folder_icon(title, cache)?;
     set_key_image(device, key, &jpeg)
 }
 
-/// Loads the image at `path` (a local path or `http(s)` URL) and pushes it to
-/// `key`, overlaying `title` if set. The encoded result is cached under
-/// `path` (and `title`), so this only happens once per combination.
-pub fn set_key_icon(
-    device: &HidDevice,
-    key: u8,
+/// Loads the image at `path` (a local path or `http(s)` URL) and encodes it
+/// (or fetches the cached encoding), without pushing it to any key. The
+/// encoded result is cached under `path` (and `title`), so this only
+/// happens once per combination.
+fn encoded_icon(
     path: &str,
     title: Option<&str>,
     cache: &IconCache,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Arc<Vec<u8>>> {
     let cache_key = with_title_suffix(path, title);
-    let jpeg = cache.get_image(&cache_key, || {
+    cache.get_image(&cache_key, || {
         let image = if path.starts_with("http://") || path.starts_with("https://") {
             let icon = cache.get_or_fetch(path).map_err(|e| anyhow::anyhow!(e))?;
             image::load_from_memory(&icon.bytes)?
@@ -175,8 +182,43 @@ pub fn set_key_icon(
             image::open(path)?
         };
         encode_key_image(&image, title)
-    })?;
+    })
+}
+
+/// Loads the image at `path` (a local path or `http(s)` URL) and pushes it to
+/// `key`, overlaying `title` if set.
+pub fn set_key_icon(
+    device: &HidDevice,
+    key: u8,
+    path: &str,
+    title: Option<&str>,
+    cache: &IconCache,
+) -> anyhow::Result<()> {
+    let jpeg = encoded_icon(path, title, cache)?;
     set_key_image(device, key, &jpeg)
+}
+
+/// Warms the cache for every icon in `keys` and its nested folders, without
+/// pushing anything to a device. Meant to run in the background so startup
+/// isn't blocked on fetching/encoding icons that aren't on screen yet.
+/// A single icon failing is logged and skipped rather than aborting the walk.
+pub fn precache_all_icons(keys: &KeyConfigMap, cache: &IconCache) {
+    for config in keys.values() {
+        let title = config.title.as_deref();
+        let result = match &config.icon {
+            Some(path) => encoded_icon(path, title, cache).map(|_| ()),
+            None if config.folder.is_some() => encoded_folder_icon(title, cache).map(|_| ()),
+            None => Ok(()),
+        };
+
+        if let Err(e) = result {
+            eprintln!("Failed to precache icon: {e}");
+        }
+
+        if let Some(folder) = &config.folder {
+            precache_all_icons(folder, cache);
+        }
+    }
 }
 
 /// Folder keys with no icon of their own fall back to the default folder icon.
