@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::action::Action;
 use crate::config::{KeyConfig, KeyConfigMap, page_at, page_at_mut, save_key_config};
 use crate::icon_cache::IconCache;
+use crate::infer_icon::infer_icon;
 use crate::push_image::{FOLDER_ICON_BYTES, clear_key_image, set_key_icon};
 use crate::{AppState, KEY_COUNT, switch_to_path};
 
@@ -305,18 +306,6 @@ async fn set_key_icon_route(
     Ok(StatusCode::OK)
 }
 
-/// Derives the conventional favicon location for `url`: `/favicon.ico` at
-/// its origin. Returns `None` if `url` isn't an absolute `http(s)` URL.
-fn favicon_url(url: &str) -> Option<String> {
-    let uri: axum::http::Uri = url.parse().ok()?;
-    let scheme = uri.scheme_str()?;
-    if scheme != "http" && scheme != "https" {
-        return None;
-    }
-    let authority = uri.authority()?;
-    Some(format!("{scheme}://{authority}/favicon.ico"))
-}
-
 async fn clear_key_icon(
     State(state): State<Arc<AppState>>,
     Path((raw_path, id)): Path<(String, u8)>,
@@ -382,15 +371,17 @@ async fn set_key_action(
 
     persist(&state)?;
 
-    // Best-effort: a webpage key with no icon of its own gets the site's
-    // favicon. Failure here (bad URL, no favicon.ico, network error)
-    // shouldn't fail the request — the action is already saved.
-    if !has_icon
-        && let Action::OpenUrl { url } = &action
-        && let Some(favicon) = favicon_url(url)
-        && let Err((_, e)) = apply_icon(&state, &path, id, favicon).await
-    {
-        eprintln!("Failed to set favicon for key {id}: {e}");
+    // Best-effort: a key with no icon of its own gets one inferred from its
+    // new action (the target webpage's favicon, or the target program's own
+    // icon). Failure here shouldn't fail the request — the action is
+    // already saved.
+    if !has_icon {
+        let cache_dir = std::path::Path::new(&state.config_path).with_file_name("icon-cache");
+        if let Some(icon) = infer_icon(&action, &cache_dir)
+            && let Err((_, e)) = apply_icon(&state, &path, id, icon).await
+        {
+            eprintln!("Failed to set inferred icon for key {id}: {e}");
+        }
     }
 
     Ok(StatusCode::OK)

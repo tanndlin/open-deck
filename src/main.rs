@@ -11,6 +11,7 @@ mod api;
 mod assets;
 mod config;
 mod icon_cache;
+mod infer_icon;
 mod push_image;
 
 const ELGATO_VID: u16 = 0x0fd9;
