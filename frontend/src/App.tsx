@@ -204,7 +204,7 @@ function App() {
   return (
     <main className="flex min-h-svh flex-col gap-6 p-4 text-center">
       <header className="mb-2">
-        <h1>Stream Deck Settings</h1>
+        <h1>Open Deck Settings</h1>
       </header>
 
       {error && (
