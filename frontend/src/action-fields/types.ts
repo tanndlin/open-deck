@@ -1,4 +1,4 @@
-import type { KeyAction } from '../api';
+import type { KeyAction } from '../types';
 
 export interface ActionFieldProps {
   /** The currently committed action, used to seed this field's initial value. */

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { keyImageUrl, type KeyConfig, type PagePath } from './api';
+import { keyImageUrl } from './api';
+import type { KeyConfig, PagePath } from './types';
 import backArrowIcon from './assets/back_arrow.png';
 
 interface KeyTileProps {

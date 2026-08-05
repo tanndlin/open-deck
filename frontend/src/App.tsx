@@ -12,11 +12,8 @@ import {
   setKeyAction,
   setKeyIcon,
   uploadKeyIcon,
-  type KeyAction,
-  type KeyConfig,
-  type KeyMap,
-  type PagePath,
 } from './api';
+import type { KeyAction, KeyConfig, KeyMap, PagePath } from './types';
 
 function samePagePath(a: PagePath, b: PagePath): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);

@@ -1,4 +1,4 @@
-import type { PagePath } from './api';
+import type { PagePath } from './types';
 
 interface PageBarProps {
   path: PagePath;

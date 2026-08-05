@@ -4,14 +4,14 @@ import { OpenFolderField } from './action-fields/OpenFolderField';
 import { OpenUrlField } from './action-fields/OpenUrlField';
 import { RunCommandField } from './action-fields/RunCommandField';
 import { TypeTextField } from './action-fields/TypeTextField';
+import { keyImageUrl } from './api';
 import {
   ACTION_TYPES,
-  keyImageUrl,
   type ActionType,
   type KeyAction,
   type KeyConfig,
   type PagePath,
-} from './api';
+} from './types';
 
 interface KeySettingsProps {
   id: number;
