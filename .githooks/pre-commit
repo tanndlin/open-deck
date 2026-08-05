@@ -1,0 +1,48 @@
+#!/bin/sh
+# Formats and builds whichever parts of the project are staged for commit.
+#
+# Not active by default — git doesn't version hooks. Enable once per clone:
+#   git config core.hooksPath .githooks
+set -e
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+restage() {
+    printf '%s\n' "$staged" | while IFS= read -r file; do
+        [ -f "$file" ] && git add "$file"
+    done
+}
+
+touches_frontend=$(printf '%s\n' "$staged" | grep -c '^frontend/' || true)
+touches_rust=$(printf '%s\n' "$staged" | grep -cE '^(src/|Cargo\.(toml|lock)$|build\.rs$)' || true)
+
+if [ "$touches_frontend" -gt 0 ]; then
+    echo "==> Formatting frontend"
+    (cd frontend && npm run format --silent)
+fi
+
+if [ "$touches_rust" -gt 0 ]; then
+    echo "==> Formatting Rust"
+    cargo fmt
+fi
+
+restage
+
+if [ "$touches_frontend" -gt 0 ]; then
+    echo "==> Building frontend"
+    (cd frontend && npm run build --silent)
+fi
+
+if [ "$touches_rust" -gt 0 ] || [ "$touches_frontend" -gt 0 ]; then
+    # The Rust binary embeds frontend/dist at compile time, so even a
+    # frontend-only change needs a Rust build to confirm it still picks up
+    # cleanly.
+    echo "==> Building Rust"
+    cargo build
+fi
+
+echo "pre-commit checks passed."
