@@ -94,7 +94,7 @@ pipeline {
         // giving a stable download URL that always points at the newest build.
         stage('Publish Latest Release') {
             when {
-                branch 'master'
+                expression { env.GIT_BRANCH == 'master' || env.GIT_BRANCH == 'origin/master' }
             }
             steps {
                 sh '''
