@@ -1,3 +1,6 @@
+// Suppresses the console window in release builds; debug builds keep it so `cargo run` still shows output.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::sync::{Arc, Mutex};
 
 use hidapi::{HidApi, HidDevice};
