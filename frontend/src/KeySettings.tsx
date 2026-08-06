@@ -1,16 +1,26 @@
 import { useEffect, useState } from 'react';
+import {
+  clearKeyAction,
+  clearKeyIcon,
+  clearKeyTitle,
+  createFolder,
+  setKeyAction,
+  setKeyIcon,
+  setKeyTitle,
+} from './api';
 import { ActionSection } from './key-settings/ActionSection';
 import { FolderSection } from './key-settings/FolderSection';
 import { IconSection } from './key-settings/IconSection';
 import { TitleSection } from './key-settings/TitleSection';
 import type { KeySettingsActions } from './key-settings/types';
-import type { KeyConfig, PagePath } from './types';
+import type { KeyAction, KeyConfig, PagePath } from './types';
 
 interface KeySettingsProps {
   id: number;
   path: PagePath;
   config: KeyConfig;
   version: number;
+  refresh: () => Promise<void>;
   onClose: () => void;
   actions: KeySettingsActions;
 }
@@ -20,6 +30,7 @@ export function KeySettings({
   path,
   config,
   version,
+  refresh,
   onClose,
   actions,
 }: KeySettingsProps) {
@@ -47,6 +58,27 @@ export function KeySettings({
     }
   }
 
+  // Every mutation below refreshes the key list afterward
+  async function withRefresh(action: () => Promise<void>) {
+    await action();
+    await refresh();
+  }
+
+  const handleSetIcon = (keyId: number, iconPath: string) =>
+    withRefresh(() => setKeyIcon(path, keyId, iconPath));
+  const handleClearIcon = (keyId: number) =>
+    withRefresh(() => clearKeyIcon(path, keyId));
+  const handleSetTitle = (keyId: number, titleText: string) =>
+    withRefresh(() => setKeyTitle(path, keyId, titleText));
+  const handleClearTitle = (keyId: number) =>
+    withRefresh(() => clearKeyTitle(path, keyId));
+  const handleSetAction = (keyId: number, keyAction: KeyAction) =>
+    withRefresh(() => setKeyAction(path, keyId, keyAction));
+  const handleClearAction = (keyId: number) =>
+    withRefresh(() => clearKeyAction(path, keyId));
+  const handleMakeFolder = (keyId: number) =>
+    withRefresh(() => createFolder(path, keyId));
+
   return (
     <div className="flex w-[320px] mr-auto shrink-0 flex-col gap-3.5 self-start rounded-[10px] border border-border bg-bg p-5">
       <div className="flex items-center justify-between">
@@ -69,7 +101,8 @@ export function KeySettings({
         version={version}
         busy={busy}
         run={run}
-        actions={actions}
+        onSetIcon={handleSetIcon}
+        onClearIcon={handleClearIcon}
       />
 
       <TitleSection
@@ -77,7 +110,8 @@ export function KeySettings({
         title={title}
         busy={busy}
         run={run}
-        actions={actions}
+        onSetTitle={handleSetTitle}
+        onClearTitle={handleClearTitle}
       />
 
       <hr className="w-full border-border" />
@@ -90,7 +124,9 @@ export function KeySettings({
           action={action}
           busy={busy}
           run={run}
-          actions={actions}
+          onSetAction={handleSetAction}
+          onClearAction={handleClearAction}
+          onMakeFolder={handleMakeFolder}
         />
       )}
 

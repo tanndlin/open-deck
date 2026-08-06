@@ -4,7 +4,6 @@ import {
   clearKeyAction,
   clearKeyIcon,
   clearKeyTitle,
-  createFolder,
   deleteFolder,
   getCurrentPage,
   getKeyCount,
@@ -16,7 +15,7 @@ import {
 import { KeyGrid } from './KeyGrid';
 import { KeySettings } from './KeySettings';
 import { PageBar } from './PageBar';
-import type { KeyAction, KeyConfig, KeyMap, PagePath } from './types';
+import type { KeyConfig, KeyMap, PagePath } from './types';
 
 function App() {
   const [keyCount, setKeyCount] = useState<number | null>(null);
@@ -76,36 +75,6 @@ function App() {
     }
   }
 
-  async function handleSetIcon(id: number, iconPath: string) {
-    await setKeyIcon(path, id, iconPath);
-    await refresh();
-  }
-
-  async function handleClearIcon(id: number) {
-    await clearKeyIcon(path, id);
-    await refresh();
-  }
-
-  async function handleSetTitle(id: number, title: string) {
-    await setKeyTitle(path, id, title);
-    await refresh();
-  }
-
-  async function handleClearTitle(id: number) {
-    await clearKeyTitle(path, id);
-    await refresh();
-  }
-
-  async function handleSetAction(id: number, action: KeyAction) {
-    await setKeyAction(path, id, action);
-    await refresh();
-  }
-
-  async function handleClearAction(id: number) {
-    await clearKeyAction(path, id);
-    await refresh();
-  }
-
   async function handlePaste(id: number, source: KeyConfig) {
     setBusy(true);
     try {
@@ -130,11 +99,6 @@ function App() {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function handleMakeFolder(id: number) {
-    await createFolder(path, id);
-    await refresh();
   }
 
   async function handleRemoveFolder(id: number) {
@@ -251,15 +215,9 @@ function App() {
               path={path}
               config={keys[selectedKey] ?? { is_folder: false }}
               version={version}
+              refresh={refresh}
               onClose={() => setSelectedKey(null)}
               actions={{
-                onSetIcon: handleSetIcon,
-                onClearIcon: handleClearIcon,
-                onSetTitle: handleSetTitle,
-                onClearTitle: handleClearTitle,
-                onSetAction: handleSetAction,
-                onClearAction: handleClearAction,
-                onMakeFolder: handleMakeFolder,
                 onRemoveFolder: handleRemoveFolder,
                 onOpenFolder: handleOpenFolder,
               }}

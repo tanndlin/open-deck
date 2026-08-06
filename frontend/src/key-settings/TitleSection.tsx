@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import type { KeySettingsActions } from './types';
 
 interface TitleSectionProps {
   id: number;
   title: string | undefined;
   busy: boolean;
   run: (action: () => Promise<void>) => void;
-  actions: Pick<KeySettingsActions, 'onSetTitle' | 'onClearTitle'>;
+  onSetTitle: (id: number, title: string) => Promise<void>;
+  onClearTitle: (id: number) => Promise<void>;
 }
 
 export function TitleSection({
@@ -14,7 +14,8 @@ export function TitleSection({
   title,
   busy,
   run,
-  actions,
+  onSetTitle,
+  onClearTitle,
 }: TitleSectionProps) {
   const [titleDraft, setTitleDraft] = useState(title ?? '');
 
@@ -32,7 +33,7 @@ export function TitleSection({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && titleDraft.trim() !== '') {
               e.preventDefault();
-              run(() => actions.onSetTitle(id, titleDraft.trim()));
+              run(() => onSetTitle(id, titleDraft.trim()));
             }
           }}
         />
@@ -43,7 +44,7 @@ export function TitleSection({
           type="button"
           className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
           disabled={busy || titleDraft.trim() === ''}
-          onClick={() => run(() => actions.onSetTitle(id, titleDraft.trim()))}
+          onClick={() => run(() => onSetTitle(id, titleDraft.trim()))}
         >
           Set title
         </button>
@@ -52,7 +53,7 @@ export function TitleSection({
           className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
           disabled={busy || title === undefined}
           onClick={() =>
-            run(() => actions.onClearTitle(id).then(() => setTitleDraft('')))
+            run(() => onClearTitle(id).then(() => setTitleDraft('')))
           }
         >
           Clear title

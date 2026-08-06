@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { keyImageUrl } from '../api';
 import type { PagePath } from '../types';
-import type { KeySettingsActions } from './types';
 
 interface IconSectionProps {
   id: number;
@@ -11,7 +10,8 @@ interface IconSectionProps {
   version: number;
   busy: boolean;
   run: (action: () => Promise<void>) => void;
-  actions: Pick<KeySettingsActions, 'onSetIcon' | 'onClearIcon'>;
+  onSetIcon: (id: number, path: string) => Promise<void>;
+  onClearIcon: (id: number) => Promise<void>;
 }
 
 export function IconSection({
@@ -22,7 +22,8 @@ export function IconSection({
   version,
   busy,
   run,
-  actions,
+  onSetIcon,
+  onClearIcon,
 }: IconSectionProps) {
   const [draft, setDraft] = useState(icon ?? '');
   const [previewBroken, setPreviewBroken] = useState(false);
@@ -58,7 +59,7 @@ export function IconSection({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && draft.trim() !== '') {
               e.preventDefault();
-              run(() => actions.onSetIcon(id, draft.trim()));
+              run(() => onSetIcon(id, draft.trim()));
             }
           }}
         />
@@ -69,7 +70,7 @@ export function IconSection({
           type="button"
           className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
           disabled={busy || draft.trim() === ''}
-          onClick={() => run(() => actions.onSetIcon(id, draft.trim()))}
+          onClick={() => run(() => onSetIcon(id, draft.trim()))}
         >
           Set icon
         </button>
@@ -77,9 +78,7 @@ export function IconSection({
           type="button"
           className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
           disabled={busy || icon === undefined}
-          onClick={() =>
-            run(() => actions.onClearIcon(id).then(() => setDraft('')))
-          }
+          onClick={() => run(() => onClearIcon(id).then(() => setDraft('')))}
         >
           Clear icon
         </button>

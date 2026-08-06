@@ -6,17 +6,15 @@ import { OpenUrlField } from '../action-fields/OpenUrlField';
 import { RunCommandField } from '../action-fields/RunCommandField';
 import { TypeTextField } from '../action-fields/TypeTextField';
 import { ACTION_TYPES, type ActionType, type KeyAction } from '../types';
-import type { KeySettingsActions } from './types';
 
 interface ActionSectionProps {
   id: number;
   action: KeyAction | undefined;
   busy: boolean;
   run: (action: () => Promise<void>) => void;
-  actions: Pick<
-    KeySettingsActions,
-    'onSetAction' | 'onClearAction' | 'onMakeFolder'
-  >;
+  onSetAction: (id: number, action: KeyAction) => Promise<void>;
+  onClearAction: (id: number) => Promise<void>;
+  onMakeFolder: (id: number) => Promise<void>;
 }
 
 export function ActionSection({
@@ -24,7 +22,9 @@ export function ActionSection({
   action,
   busy,
   run,
-  actions,
+  onSetAction,
+  onClearAction,
+  onMakeFolder,
 }: ActionSectionProps) {
   const [actionType, setActionType] = useState<ActionType>(
     action?.type ?? 'run_command',
@@ -56,9 +56,7 @@ export function ActionSection({
         actionType={actionType}
         action={action}
         disabled={busy}
-        onSubmit={(builtAction) =>
-          run(() => actions.onSetAction(id, builtAction))
-        }
+        onSubmit={(builtAction) => run(() => onSetAction(id, builtAction))}
       />
 
       <button
@@ -66,9 +64,7 @@ export function ActionSection({
         className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
         disabled={busy || action === undefined}
         onClick={() =>
-          run(() =>
-            actions.onClearAction(id).then(() => setClearNonce((n) => n + 1)),
-          )
+          run(() => onClearAction(id).then(() => setClearNonce((n) => n + 1)))
         }
       >
         Clear action
@@ -78,7 +74,7 @@ export function ActionSection({
         type="button"
         className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
         disabled={busy}
-        onClick={() => run(() => actions.onMakeFolder(id))}
+        onClick={() => run(() => onMakeFolder(id))}
       >
         Make this a folder
       </button>
