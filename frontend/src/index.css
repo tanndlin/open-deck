@@ -96,3 +96,8 @@
     margin: 0;
   }
 }
+
+#home-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+}

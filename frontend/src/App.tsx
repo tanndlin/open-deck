@@ -15,6 +15,9 @@ import {
   setKeyTitle,
   uploadKeyIcon,
 } from './api';
+import { KeySettings } from './KeySettings';
+import { KeyTile } from './KeyTile';
+import { PageBar } from './PageBar';
 import type { KeyAction, KeyConfig, KeyMap, PagePath } from './types';
 
 function samePagePath(a: PagePath, b: PagePath): boolean {
@@ -23,9 +26,6 @@ function samePagePath(a: PagePath, b: PagePath): boolean {
 
 /** How long a key must hover over a folder while being dragged before it opens. */
 const FOLDER_HOVER_OPEN_MS = 1000;
-import { KeySettings } from './KeySettings';
-import { KeyTile } from './KeyTile';
-import { PageBar } from './PageBar';
 
 function App() {
   const [keyCount, setKeyCount] = useState<number | null>(null);
@@ -324,7 +324,11 @@ function App() {
       {keyCount === null ? (
         <p>Loading…</p>
       ) : (
-        <div className="mx-auto flex w-full max-w-[70rem] flex-wrap items-start justify-center gap-6">
+        <div
+          id="home-grid"
+          className="mx-auto flex w-full flex-wrap items-start justify-center gap-6"
+        >
+          <div />
           <div
             className={`grid max-w-160 flex-1 grid-cols-5 gap-3 ${busy && !dragSource ? 'pointer-events-none opacity-50' : ''}`}
           >

@@ -48,7 +48,7 @@ export function KeySettings({
   }
 
   return (
-    <div className="flex w-[min(320px,calc(100vw-32px))] shrink-0 flex-col gap-3.5 self-start rounded-[10px] border border-border bg-bg p-5">
+    <div className="flex w-[320px] mr-auto shrink-0 flex-col gap-3.5 self-start rounded-[10px] border border-border bg-bg p-5">
       <div className="flex items-center justify-between">
         <h2 className="m-0">Key {id}</h2>
         <button
