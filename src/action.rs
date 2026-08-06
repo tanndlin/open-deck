@@ -128,8 +128,13 @@ fn parse_key(name: &str) -> Option<Key> {
 
 #[cfg(target_os = "windows")]
 fn shell_command(command: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+
+    // raw_arg avoids Rust's automatic Windows quoting, which backslash-escapes
+    // embedded quotes (e.g. a quoted "program with spaces" path) in a way
+    // cmd.exe doesn't understand and mangles into "not recognized" errors.
     let mut c = std::process::Command::new("cmd");
-    c.args(["/C", command]);
+    c.raw_arg(format!("/C {command}"));
     c
 }
 
