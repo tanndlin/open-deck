@@ -1,18 +1,8 @@
 import { useEffect, useState } from 'react';
-import {
-  clearKeyAction,
-  clearKeyIcon,
-  clearKeyTitle,
-  createFolder,
-  setKeyAction,
-  setKeyIcon,
-  setKeyTitle,
-} from './api';
 import { ActionSection } from './key-settings/ActionSection';
 import { FolderSection } from './key-settings/FolderSection';
 import { IconSection } from './key-settings/IconSection';
 import { TitleSection } from './key-settings/TitleSection';
-import type { KeySettingsActions } from './key-settings/types';
 import type { KeyAction, KeyConfig, PagePath } from './types';
 
 interface KeySettingsProps {
@@ -20,9 +10,16 @@ interface KeySettingsProps {
   path: PagePath;
   config: KeyConfig;
   version: number;
-  refresh: () => Promise<void>;
   onClose: () => void;
-  actions: KeySettingsActions;
+  onSetIcon: (id: number, iconPath: string) => Promise<void>;
+  onClearIcon: (id: number) => Promise<void>;
+  onSetTitle: (id: number, title: string) => Promise<void>;
+  onClearTitle: (id: number) => Promise<void>;
+  onSetAction: (id: number, action: KeyAction) => Promise<void>;
+  onClearAction: (id: number) => Promise<void>;
+  onMakeFolder: (id: number) => Promise<void>;
+  onRemoveFolder: (id: number) => Promise<void>;
+  onOpenFolder: (id: number) => void;
 }
 
 export function KeySettings({
@@ -30,9 +27,16 @@ export function KeySettings({
   path,
   config,
   version,
-  refresh,
   onClose,
-  actions,
+  onSetIcon,
+  onClearIcon,
+  onSetTitle,
+  onClearTitle,
+  onSetAction,
+  onClearAction,
+  onMakeFolder,
+  onRemoveFolder,
+  onOpenFolder,
 }: KeySettingsProps) {
   const { icon, title, action, is_folder: isFolder } = config;
   const [busy, setBusy] = useState(false);
@@ -46,38 +50,17 @@ export function KeySettings({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
-  async function run(action: () => Promise<void>) {
+  async function run(fn: () => Promise<void>) {
     setBusy(true);
     setError(null);
     try {
-      await action();
+      await fn();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   }
-
-  // Every mutation below refreshes the key list afterward
-  async function withRefresh(action: () => Promise<void>) {
-    await action();
-    await refresh();
-  }
-
-  const handleSetIcon = (keyId: number, iconPath: string) =>
-    withRefresh(() => setKeyIcon(path, keyId, iconPath));
-  const handleClearIcon = (keyId: number) =>
-    withRefresh(() => clearKeyIcon(path, keyId));
-  const handleSetTitle = (keyId: number, titleText: string) =>
-    withRefresh(() => setKeyTitle(path, keyId, titleText));
-  const handleClearTitle = (keyId: number) =>
-    withRefresh(() => clearKeyTitle(path, keyId));
-  const handleSetAction = (keyId: number, keyAction: KeyAction) =>
-    withRefresh(() => setKeyAction(path, keyId, keyAction));
-  const handleClearAction = (keyId: number) =>
-    withRefresh(() => clearKeyAction(path, keyId));
-  const handleMakeFolder = (keyId: number) =>
-    withRefresh(() => createFolder(path, keyId));
 
   return (
     <div className="flex w-[320px] mr-auto shrink-0 flex-col gap-3.5 self-start rounded-[10px] border border-border bg-bg p-5">
@@ -101,8 +84,8 @@ export function KeySettings({
         version={version}
         busy={busy}
         run={run}
-        onSetIcon={handleSetIcon}
-        onClearIcon={handleClearIcon}
+        onSetIcon={onSetIcon}
+        onClearIcon={onClearIcon}
       />
 
       <TitleSection
@@ -110,23 +93,29 @@ export function KeySettings({
         title={title}
         busy={busy}
         run={run}
-        onSetTitle={handleSetTitle}
-        onClearTitle={handleClearTitle}
+        onSetTitle={onSetTitle}
+        onClearTitle={onClearTitle}
       />
 
       <hr className="w-full border-border" />
 
       {isFolder ? (
-        <FolderSection id={id} busy={busy} run={run} actions={actions} />
+        <FolderSection
+          id={id}
+          busy={busy}
+          run={run}
+          onOpenFolder={onOpenFolder}
+          onRemoveFolder={onRemoveFolder}
+        />
       ) : (
         <ActionSection
           id={id}
           action={action}
           busy={busy}
           run={run}
-          onSetAction={handleSetAction}
-          onClearAction={handleClearAction}
-          onMakeFolder={handleMakeFolder}
+          onSetAction={onSetAction}
+          onClearAction={onClearAction}
+          onMakeFolder={onMakeFolder}
         />
       )}
 

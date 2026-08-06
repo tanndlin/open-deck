@@ -11,7 +11,7 @@ interface ActionSectionProps {
   id: number;
   action: KeyAction | undefined;
   busy: boolean;
-  run: (action: () => Promise<void>) => void;
+  run: (fn: () => Promise<void>) => void;
   onSetAction: (id: number, action: KeyAction) => Promise<void>;
   onClearAction: (id: number) => Promise<void>;
   onMakeFolder: (id: number) => Promise<void>;

@@ -9,7 +9,7 @@ interface IconSectionProps {
   isFolder: boolean;
   version: number;
   busy: boolean;
-  run: (action: () => Promise<void>) => void;
+  run: (fn: () => Promise<void>) => void;
   onSetIcon: (id: number, path: string) => Promise<void>;
   onClearIcon: (id: number) => Promise<void>;
 }

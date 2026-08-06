@@ -1,13 +1,18 @@
-import type { KeySettingsActions } from './types';
-
 interface FolderSectionProps {
   id: number;
   busy: boolean;
-  run: (action: () => Promise<void>) => void;
-  actions: Pick<KeySettingsActions, 'onOpenFolder' | 'onRemoveFolder'>;
+  run: (fn: () => Promise<void>) => void;
+  onOpenFolder: (id: number) => void;
+  onRemoveFolder: (id: number) => Promise<void>;
 }
 
-export function FolderSection({ id, busy, run, actions }: FolderSectionProps) {
+export function FolderSection({
+  id,
+  busy,
+  run,
+  onOpenFolder,
+  onRemoveFolder,
+}: FolderSectionProps) {
   function handleRemoveFolder() {
     if (
       !window.confirm(
@@ -16,7 +21,7 @@ export function FolderSection({ id, busy, run, actions }: FolderSectionProps) {
     ) {
       return;
     }
-    run(() => actions.onRemoveFolder(id));
+    run(() => onRemoveFolder(id));
   }
 
   return (
@@ -27,7 +32,7 @@ export function FolderSection({ id, busy, run, actions }: FolderSectionProps) {
           type="button"
           className="cursor-pointer rounded-sm border border-border bg-code-bg px-3 py-1.5 text-sm text-text-h disabled:cursor-not-allowed disabled:opacity-50"
           disabled={busy}
-          onClick={() => actions.onOpenFolder(id)}
+          onClick={() => onOpenFolder(id)}
         >
           Open folder
         </button>

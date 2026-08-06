@@ -4,7 +4,7 @@ interface TitleSectionProps {
   id: number;
   title: string | undefined;
   busy: boolean;
-  run: (action: () => Promise<void>) => void;
+  run: (fn: () => Promise<void>) => void;
   onSetTitle: (id: number, title: string) => Promise<void>;
   onClearTitle: (id: number) => Promise<void>;
 }
