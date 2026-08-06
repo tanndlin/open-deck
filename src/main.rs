@@ -124,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let poll_state = state.clone();
-    std::thread::spawn(move || poll_keys(&poll_state));
+    std::thread::spawn(move || poll_keys(&poll_state, hid));
 
     // Warms the cache for icons outside the home page (nested folders, plus
     // anything on the home page that failed above) so opening a folder later
@@ -144,7 +144,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn poll_keys(state: &AppState) {
+fn poll_keys(state: &AppState, mut hid: HidApi) {
     let mut buf = [0u8; 512];
     let header_len = 4;
     let mut pressed = [false; KEY_COUNT as usize];
@@ -193,6 +193,20 @@ fn poll_keys(state: &AppState) {
                     eprintln!("HID read error: {e}");
                     last_error = Some(message);
                 }
+
+                if let Some(device) = try_reopen_device(&mut hid) {
+                    println!("Stream Deck reconnected");
+                    *state.device.lock().unwrap() = device;
+                    // The newly opened device can start blank, so redraw whatever
+                    // page was on screen before the disconnect.
+                    let path = state.current_path.lock().unwrap().clone();
+                    if let Err(e) = switch_to_path(state, &path) {
+                        eprintln!("Failed to refresh icons after reconnect: {e}");
+                    }
+                    pressed = [false; KEY_COUNT as usize];
+                    last_error = None;
+                }
+
                 // A disconnected device errors on every read instead of
                 // timing out like an idle one does, so without this sleep
                 // the loop would busy-spin as fast as the OS returns errors.
@@ -200,6 +214,15 @@ fn poll_keys(state: &AppState) {
             }
         }
     }
+}
+
+/// Rescans for HID devices and tries to open the Stream Deck, for use after a
+/// read error that suggests it was unplugged
+fn try_reopen_device(hid: &mut HidApi) -> Option<HidDevice> {
+    hid.refresh_devices().ok()?;
+    let device = hid.open(ELGATO_VID, STREAMDECK_MK2_PID).ok()?;
+    device.set_blocking_mode(false).ok()?;
+    Some(device)
 }
 
 fn run_key_action(state: &AppState, key: u8) {
