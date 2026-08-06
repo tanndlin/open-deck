@@ -26,6 +26,10 @@ pub enum Action {
     DiscordJoinVoice {
         channel_id: String,
     },
+    /// Runs each sub-action in order.
+    Multi {
+        actions: Vec<Action>,
+    },
 }
 
 impl Action {
@@ -59,6 +63,11 @@ impl Action {
             Action::DiscordJoinVoice { channel_id } => {
                 if let Err(e) = crate::discord::join_voice_channel(channel_id) {
                     eprintln!("Failed to join Discord voice channel '{channel_id}': {e}");
+                }
+            }
+            Action::Multi { actions } => {
+                for action in actions {
+                    action.execute();
                 }
             }
         }

@@ -5,6 +5,7 @@ interface ActionPayloads {
   type_text: { text: string };
   hotkey: { keys: string[] };
   discord_join_voice: { channel_id: string };
+  multi: { actions: KeyAction[] };
 }
 
 export type KeyAction = {
@@ -23,6 +24,7 @@ const ACTION_LABELS = {
   type_text: 'Type text',
   hotkey: 'Hotkey',
   discord_join_voice: 'Join Discord voice channel',
+  multi: 'Multiple actions',
 } satisfies Record<ActionType, string>;
 
 export const ACTION_TYPES = Object.entries(ACTION_LABELS).map(
@@ -31,6 +33,27 @@ export const ACTION_TYPES = Object.entries(ACTION_LABELS).map(
     label,
   }),
 );
+
+/** Short one-line preview of an action's payload, for compact list rows. */
+export function actionSummary(action: KeyAction | undefined): string {
+  if (!action) return 'No action set';
+  switch (action.type) {
+    case 'run_command':
+      return action.command;
+    case 'open_url':
+      return action.url;
+    case 'open_folder':
+      return action.path;
+    case 'type_text':
+      return action.text;
+    case 'hotkey':
+      return action.keys.join('+');
+    case 'discord_join_voice':
+      return action.channel_id;
+    case 'multi':
+      return `${action.actions.length} action${action.actions.length === 1 ? '' : 's'}`;
+  }
+}
 
 export interface KeyConfig {
   icon?: string;
