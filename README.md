@@ -40,8 +40,8 @@ to the rolling [`latest` release](https://github.com/tanndlin/open-deck/releases
    ```
    ./target/release/open-deck
    ```
-   It reads `config.json` from the working directory and serves the web UI
-   at http://127.0.0.1:3000.
+   It reads `config.json` from `~/.open-deck/` (created on first run) and
+   serves the web UI at http://127.0.0.1:3000.
 
 ### Cross-compiling for Windows from Linux
 
@@ -69,9 +69,9 @@ Setup:
    as a redirect. It's never actually visited (this flow authorizes in-client,
    not through a browser), but Discord requires the redirect used in the
    token exchange to be registered.
-3. Copy `discord_config.example.json` to `discord_config.json` next to
-   `config.json`, and fill in the application's Client ID and Client Secret
-   from **OAuth2 → General**.
+3. Copy `discord_config.example.json` to `~/.open-deck/discord_config.json`,
+   and fill in the application's Client ID and Client Secret from
+   **OAuth2 → General**.
 4. Set a key's action to "Join Discord voice channel" and enter the target
    channel's ID (right-click the channel in Discord with Developer Mode
    enabled → Copy Channel ID). The first press pops an in-client "Authorize"

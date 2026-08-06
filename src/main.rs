@@ -22,7 +22,7 @@ mod title;
 const ELGATO_VID: u16 = 0x0fd9;
 const STREAMDECK_MK2_PID: u16 = 0x006d;
 const KEY_COUNT: u8 = 15;
-const CONFIG_PATH: &str = "config.json";
+const CONFIG_FILE_NAME: &str = "config.json";
 const API_ADDR: &str = "127.0.0.1:3000";
 
 /// On every non-home page, pressing this goes back up a level instead of running its configured action.
@@ -81,10 +81,14 @@ async fn main() -> anyhow::Result<()> {
     let icon_cache = IconCache::new();
 
     clear_all_keys(&device, &icon_cache)?;
-    let root = if let Some(root) = load_key_config(CONFIG_PATH)? {
+    let config_path = config::config_dir()
+        .join(CONFIG_FILE_NAME)
+        .to_string_lossy()
+        .to_string();
+    let root = if let Some(root) = load_key_config(&config_path)? {
         root
     } else {
-        println!("No config at {CONFIG_PATH}, skipping");
+        println!("No config at {config_path}, skipping");
         KeyConfigMap::new()
     };
     load_key_icons(&device, &root, &icon_cache);
@@ -95,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
         device: Mutex::new(device),
         root: Mutex::new(root),
         current_path: Mutex::new(Vec::new()),
-        config_path: CONFIG_PATH.to_string(),
+        config_path,
         icon_cache,
     });
 

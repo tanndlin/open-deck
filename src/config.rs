@@ -1,8 +1,28 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
 use crate::action::Action;
+
+/// Directory where all user config files live: `~/.open-deck`. Created if missing.
+pub fn config_dir() -> PathBuf {
+    let dir = home_dir()
+        .expect("could not determine home directory")
+        .join(".open-deck");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+#[cfg(windows)]
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE").map(PathBuf::from)
+}
+
+#[cfg(unix)]
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
 
 /// A key is a "folder" if `folder` is set: pressing it opens the nested page
 /// instead of running `action`. A folder's page is reachable only through

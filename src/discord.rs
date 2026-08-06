@@ -2,13 +2,16 @@
 //! mechanism Discord's own SDK and third-party rich-presence tools use), so
 //! that actions here move the user's real client, not a bot.
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-const DISCORD_CONFIG_PATH: &str = "discord_config.json";
+use crate::config::config_dir;
+
+const DISCORD_CONFIG_FILE_NAME: &str = "discord_config.json";
 const RPC_VERSION: u32 = 1;
 const OP_HANDSHAKE: u32 = 0;
 const OP_FRAME: u32 = 1;
@@ -34,11 +37,17 @@ fn default_redirect_uri() -> String {
     "http://127.0.0.1:3000/api/discord/callback".to_string()
 }
 
+fn discord_config_path() -> PathBuf {
+    config_dir().join(DISCORD_CONFIG_FILE_NAME)
+}
+
 fn load_config() -> anyhow::Result<DiscordConfig> {
-    let contents = std::fs::read_to_string(DISCORD_CONFIG_PATH).map_err(|e| {
+    let path = discord_config_path();
+    let contents = std::fs::read_to_string(&path).map_err(|e| {
         anyhow::anyhow!(
-            "no {DISCORD_CONFIG_PATH} found ({e}); create one with client_id/client_secret \
-             from a Discord application (see discord_config.example.json)"
+            "no {} found ({e}); create one with client_id/client_secret \
+             from a Discord application (see discord_config.example.json)",
+            path.display()
         )
     })?;
     Ok(serde_json::from_str(&contents)?)
@@ -46,7 +55,7 @@ fn load_config() -> anyhow::Result<DiscordConfig> {
 
 fn save_config(config: &DiscordConfig) -> anyhow::Result<()> {
     let contents = serde_json::to_string_pretty(config)?;
-    std::fs::write(DISCORD_CONFIG_PATH, contents)?;
+    std::fs::write(discord_config_path(), contents)?;
     Ok(())
 }
 
