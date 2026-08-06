@@ -128,6 +128,9 @@ fn poll_keys(state: &AppState) {
     let mut buf = [0u8; 512];
     let header_len = 4;
     let mut pressed = [false; KEY_COUNT as usize];
+    // Tracks the last-seen read error so a disconnected device (which errors
+    // on every read instead of timing out) logs once instead of spamming.
+    let mut last_error: Option<String> = None;
 
     loop {
         let read_result = {
@@ -138,9 +141,11 @@ fn poll_keys(state: &AppState) {
         match read_result {
             Ok(0) => {
                 // timeout — no state change, keep polling
+                last_error = None;
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             Ok(n) => {
+                last_error = None;
                 // buf[0] = report ID (0x01)
                 // buf[1..4] = header bytes to skip
                 // buf[4..n] = one byte per key, 0x01 = pressed, 0x00 = released
@@ -162,7 +167,17 @@ fn poll_keys(state: &AppState) {
                     pressed[key_index] = is_pressed;
                 }
             }
-            Err(e) => eprintln!("HID read error: {e}"),
+            Err(e) => {
+                let message = e.to_string();
+                if last_error.as_deref() != Some(message.as_str()) {
+                    eprintln!("HID read error: {e}");
+                    last_error = Some(message);
+                }
+                // A disconnected device errors on every read instead of
+                // timing out like an idle one does, so without this sleep
+                // the loop would busy-spin as fast as the OS returns errors.
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
         }
     }
 }
