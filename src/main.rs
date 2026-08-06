@@ -62,6 +62,26 @@ pub(crate) fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()
     Ok(())
 }
 
+/// Retries opening the Stream Deck until it succeeds, so starting the app
+/// before the device is plugged in (or while it's disconnected) doesn't
+/// crash it — it just waits. Logs once per distinct failure, not on every attempt.
+fn open_device_with_retry(hid: &HidApi) -> HidDevice {
+    let mut last_error: Option<String> = None;
+    loop {
+        match hid.open(ELGATO_VID, STREAMDECK_MK2_PID) {
+            Ok(device) => return device,
+            Err(e) => {
+                let message = e.to_string();
+                if last_error.as_deref() != Some(message.as_str()) {
+                    eprintln!("Stream Deck not found ({e}); waiting for it to connect...");
+                    last_error = Some(message);
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let hid = HidApi::new()?;
@@ -77,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let device = hid.open(ELGATO_VID, STREAMDECK_MK2_PID)?;
+    let device = open_device_with_retry(&hid);
     let icon_cache = IconCache::new();
 
     clear_all_keys(&device, &icon_cache)?;
