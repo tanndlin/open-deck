@@ -22,6 +22,10 @@ pub enum Action {
     Hotkey {
         keys: Vec<String>,
     },
+    /// Joins the local Discord client to a voice channel by snowflake ID.
+    DiscordJoinVoice {
+        channel_id: String,
+    },
 }
 
 impl Action {
@@ -50,6 +54,11 @@ impl Action {
             Action::Hotkey { keys } => {
                 if let Err(e) = press_hotkey(keys) {
                     eprintln!("Failed to send hotkey '{}': {e}", keys.join("+"));
+                }
+            }
+            Action::DiscordJoinVoice { channel_id } => {
+                if let Err(e) = crate::discord::join_voice_channel(channel_id) {
+                    eprintln!("Failed to join Discord voice channel '{channel_id}': {e}");
                 }
             }
         }

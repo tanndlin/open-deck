@@ -8,6 +8,11 @@ pub fn infer_icon(action: &Action, cache_dir: &Path) -> Option<String> {
     match action {
         Action::OpenUrl { url } => favicon_url(url),
         Action::RunCommand { command } => command_icon(command, cache_dir),
+        Action::DiscordJoinVoice { channel_id } => {
+            crate::discord::guild_icon_for_channel(channel_id)
+                .ok()
+                .flatten()
+        }
         Action::OpenFolder { .. } | Action::TypeText { .. } | Action::Hotkey { .. } => None,
     }
 }

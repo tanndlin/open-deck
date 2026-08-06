@@ -10,6 +10,7 @@ mod action;
 mod api;
 mod assets;
 mod config;
+mod discord;
 mod icon_cache;
 mod infer_icon;
 mod push_image;
@@ -191,6 +192,10 @@ fn run_key_action(state: &AppState, key: u8) {
     }
 
     if let Some(action) = action {
-        action.execute();
+        // Off the polling thread: most actions are near-instant, but a
+        // Discord join can block for seconds (or until the user dismisses
+        // an "Authorize" dialog), which would otherwise stall every other
+        // key press until it resolves.
+        std::thread::spawn(move || action.execute());
     }
 }

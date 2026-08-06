@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DiscordJoinVoiceField } from '../action-fields/DiscordJoinVoiceField';
 import { HotkeyField } from '../action-fields/HotkeyField';
 import { OpenFolderField } from '../action-fields/OpenFolderField';
 import { OpenUrlField } from '../action-fields/OpenUrlField';
@@ -130,6 +131,14 @@ function ActionTypeField({
     case 'hotkey':
       return (
         <HotkeyField action={action} disabled={disabled} onSubmit={onSubmit} />
+      );
+    case 'discord_join_voice':
+      return (
+        <DiscordJoinVoiceField
+          action={action}
+          disabled={disabled}
+          onSubmit={onSubmit}
+        />
       );
   }
 }

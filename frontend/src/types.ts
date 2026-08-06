@@ -4,6 +4,7 @@ interface ActionPayloads {
   open_folder: { path: string };
   type_text: { text: string };
   hotkey: { keys: string[] };
+  discord_join_voice: { channel_id: string };
 }
 
 export type KeyAction = {
@@ -21,6 +22,7 @@ const ACTION_LABELS = {
   open_folder: 'Open folder',
   type_text: 'Type text',
   hotkey: 'Hotkey',
+  discord_join_voice: 'Join Discord voice channel',
 } satisfies Record<ActionType, string>;
 
 export const ACTION_TYPES = Object.entries(ACTION_LABELS).map(

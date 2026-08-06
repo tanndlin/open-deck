@@ -3,4 +3,5 @@
 icons/*
 icon-cache/*
 config.json
+discord_config.json
 .claude
