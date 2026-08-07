@@ -3,12 +3,16 @@ use std::sync::Arc;
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{DefaultBodyLimit, Path, Query, State},
+    extract::{
+        DefaultBodyLimit, Path, Query, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
     http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post, put},
 };
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 
 use crate::action::Action;
 use crate::config::{KeyConfig, KeyConfigMap, page_at, page_at_mut, save_key_config};
@@ -56,7 +60,70 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/api/move", post(move_key))
         .route("/api/pages/{path}/keys/{id}/image", get(get_key_image))
+        .route("/api/ws", get(ws_handler))
         .with_state(state)
+}
+
+/// Pushed to `/api/ws` clients so the GUI's device state never drifts from
+/// what's actually happening on the physical Stream Deck.
+#[derive(Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServerEvent {
+    /// The page currently pushed onto the device changed (device-triggered or
+    /// GUI-triggered). Also sent once, immediately, when a client connects,
+    /// so it never has to separately fetch `/api/current-page` to sync up.
+    PageChanged { path: String },
+    /// A physical key was pressed, on the page shown on the device at that
+    /// moment. Purely informational — a `PageChanged` may follow if the press
+    /// navigated somewhere.
+    KeyPressed { path: String, id: u8 },
+}
+
+async fn ws_handler(State(state): State<Arc<AppState>>, ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
+}
+
+async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
+    let mut events = state.events.subscribe();
+
+    let snapshot = ServerEvent::PageChanged {
+        path: format_page_path(&state.current_path.lock().unwrap()),
+    };
+    if !send_event(&mut socket, &snapshot).await {
+        return;
+    }
+
+    loop {
+        tokio::select! {
+            event = events.recv() => {
+                match event {
+                    Ok(event) => {
+                        if !send_event(&mut socket, &event).await {
+                            break;
+                        }
+                    }
+                    // A slow client missed some events — its next message is
+                    // still current, so just keep going.
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            // The GUI never sends anything meaningful; this is only here to
+            // notice the socket closing so the task can exit.
+            msg = socket.recv() => {
+                if !matches!(msg, Some(Ok(_))) {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+async fn send_event(socket: &mut WebSocket, event: &ServerEvent) -> bool {
+    let Ok(text) = serde_json::to_string(event) else {
+        return true;
+    };
+    socket.send(Message::Text(text.into())).await.is_ok()
 }
 
 async fn key_count() -> Json<u8> {
@@ -90,7 +157,7 @@ fn parse_page_path(raw: &str) -> Result<Vec<u8>, ApiError> {
         .collect()
 }
 
-fn format_page_path(path: &[u8]) -> String {
+pub(crate) fn format_page_path(path: &[u8]) -> String {
     if path.is_empty() {
         "home".to_string()
     } else {

@@ -2,18 +2,10 @@ import type { PagePath } from './types';
 
 interface PageBarProps {
   path: PagePath;
-  currentDevicePath: PagePath | null;
   onNavigate: (path: PagePath) => void;
 }
 
-function samePath(a: PagePath, b: PagePath): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
-}
-
-export function PageBar({ path, currentDevicePath, onNavigate }: PageBarProps) {
-  const isOnDevice =
-    currentDevicePath !== null && samePath(path, currentDevicePath);
-
+export function PageBar({ path, onNavigate }: PageBarProps) {
   return (
     <div className="mx-auto flex w-full max-w-160 flex-wrap items-center justify-center gap-1 text-sm">
       <button
@@ -37,11 +29,6 @@ export function PageBar({ path, currentDevicePath, onNavigate }: PageBarProps) {
           </button>
         </span>
       ))}
-      {!isOnDevice && currentDevicePath !== null && (
-        <span className="ml-1 text-xs text-text opacity-60">
-          (device is showing a different page)
-        </span>
-      )}
     </div>
   );
 }

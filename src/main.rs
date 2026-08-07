@@ -4,7 +4,9 @@
 use std::sync::{Arc, Mutex};
 
 use hidapi::{HidApi, HidDevice};
+use tokio::sync::broadcast;
 
+use crate::api::{ServerEvent, format_page_path};
 use crate::config::{KeyConfigMap, load_key_config, page_at};
 use crate::icon_cache::IconCache;
 use crate::push_image::{clear_all_keys, load_key_icons, precache_all_icons, set_back_arrow_icon};
@@ -37,6 +39,9 @@ struct AppState {
     current_path: Mutex<Vec<u8>>,
     config_path: String,
     icon_cache: IconCache,
+    /// Broadcasts page changes and key presses to connected `/api/ws` clients,
+    /// so the GUI's notion of device state never drifts from the real thing.
+    events: broadcast::Sender<ServerEvent>,
 }
 
 /// Clears the device and pushes the page at `path` onto it, then marks it as active.
@@ -50,6 +55,10 @@ pub(crate) fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()
     // device I/O below — otherwise a mid-render failure leaves the screen
     // showing the new page while presses still resolve against the old one.
     *state.current_path.lock().unwrap() = path.to_vec();
+
+    let _ = state.events.send(ServerEvent::PageChanged {
+        path: format_page_path(path),
+    });
 
     let device = state.device.lock().unwrap();
     clear_all_keys(&device, &state.icon_cache)?;
@@ -115,12 +124,15 @@ async fn main() -> anyhow::Result<()> {
 
     device.set_blocking_mode(false)?;
 
+    let (events_tx, _events_rx) = broadcast::channel(32);
+
     let state = Arc::new(AppState {
         device: Mutex::new(device),
         root: Mutex::new(root),
         current_path: Mutex::new(Vec::new()),
         config_path,
         icon_cache,
+        events: events_tx,
     });
 
     let poll_state = state.clone();
@@ -182,7 +194,15 @@ fn poll_keys(state: &AppState, mut hid: HidApi) {
                         println!("Key {key_index} pressed");
                         // key_index < pressed.len() == KEY_COUNT, checked above.
                         #[allow(clippy::cast_possible_truncation)]
-                        run_key_action(state, key_index as u8);
+                        let key_id = key_index as u8;
+                        // Path as shown at press time — run_key_action may itself
+                        // change it (folder/back navigation), which fires its own
+                        // PageChanged broadcast via switch_to_path.
+                        let _ = state.events.send(ServerEvent::KeyPressed {
+                            path: format_page_path(&state.current_path.lock().unwrap()),
+                            id: key_id,
+                        });
+                        run_key_action(state, key_id);
                     }
                     pressed[key_index] = is_pressed;
                 }

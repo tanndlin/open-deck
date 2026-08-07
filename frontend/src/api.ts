@@ -180,3 +180,44 @@ export function keyImageUrl(
 ): string {
   return `/api/pages/${formatPagePath(path)}/keys/${id}/image?v=${version}`;
 }
+
+/** Mirrors the server's `ServerEvent` (see `src/api.rs`). `path` is a formatted `PagePath` (see `formatPagePath`). */
+export type DeviceEvent =
+  | { type: 'page_changed'; path: string }
+  | { type: 'key_pressed'; path: string; id: number };
+
+/**
+ * Subscribes to `/api/ws` for live device state, so the GUI's notion of the
+ * current page (and physical key presses) never drifts from what the device
+ * is actually doing. Reconnects automatically if the connection drops.
+ * Returns a function that tears the subscription down.
+ */
+export function subscribeDeviceEvents(
+  onEvent: (event: DeviceEvent) => void,
+): () => void {
+  let socket: WebSocket | null = null;
+  let stopped = false;
+  let retryTimer: number | null = null;
+
+  function connect() {
+    if (stopped) return;
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    socket = new WebSocket(`${protocol}//${location.host}/api/ws`);
+    socket.onmessage = (e) => {
+      onEvent(JSON.parse(e.data as string) as DeviceEvent);
+    };
+    // Fires on a clean close, a dropped connection, or a failed handshake
+    // (which also triggers 'error' immediately before this).
+    socket.onclose = () => {
+      if (stopped) return;
+      retryTimer = window.setTimeout(connect, 1000);
+    };
+  }
+  connect();
+
+  return () => {
+    stopped = true;
+    if (retryTimer !== null) window.clearTimeout(retryTimer);
+    socket?.close();
+  };
+}

@@ -16,6 +16,8 @@ interface KeyGridProps {
   keys: KeyMap;
   version: number;
   selectedKey: number | null;
+  /** The physically-pressed key, briefly, for a visual flash. */
+  flashedKey: number | null;
   busy: boolean;
   setBusy: (busy: boolean) => void;
   setError: (error: string | null) => void;
@@ -31,6 +33,7 @@ export function KeyGrid({
   keys,
   version,
   selectedKey,
+  flashedKey,
   busy,
   setBusy,
   setError,
@@ -143,6 +146,7 @@ export function KeyGrid({
           config={keys[id] ?? { is_folder: false }}
           version={version}
           selected={selectedKey === id}
+          flashed={flashedKey === id}
           onClick={handleTileClick}
           drag={{
             onDragStart: handleDragStart,

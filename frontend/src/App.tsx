@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   activatePage,
   clearKeyAction,
@@ -6,12 +6,14 @@ import {
   clearKeyTitle,
   createFolder,
   deleteFolder,
-  getCurrentPage,
+  formatPagePath,
   getKeyCount,
   listKeys,
+  parsePagePath,
   setKeyAction,
   setKeyIcon,
   setKeyTitle,
+  subscribeDeviceEvents,
 } from './api';
 import { KeyGrid } from './KeyGrid';
 import { KeySettings } from './KeySettings';
@@ -22,9 +24,8 @@ function App() {
   const [keyCount, setKeyCount] = useState<number | null>(null);
   const [path, setPath] = useState<PagePath>([]);
   const [keys, setKeys] = useState<KeyMap>({});
-  const [currentDevicePath, setCurrentDevicePath] = useState<PagePath | null>(
-    null,
-  );
+  // The physically-pressed key, briefly, for a visual flash on the grid.
+  const [flashedKey, setFlashedKey] = useState<number | null>(null);
   const [version, setVersion] = useState(0);
   const [selectedKey, setSelectedKey] = useState<number | null>(null);
   const [clipboard, setClipboard] = useState<{
@@ -37,15 +38,13 @@ function App() {
   async function refresh(pathOverride?: PagePath) {
     const activePath = pathOverride ?? path;
     try {
-      const [count, mapping, devicePath] = await Promise.all([
+      const [count, mapping] = await Promise.all([
         getKeyCount(),
         listKeys(activePath),
-        getCurrentPage(),
       ]);
       setKeyCount(count);
       setPath(activePath);
       setKeys(mapping);
-      setCurrentDevicePath(devicePath);
       setVersion((v) => v + 1);
       setError(null);
     } catch (e) {
@@ -58,6 +57,35 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // `path` as last rendered, for use inside the WS handler below without
+  // resubscribing (and dropping the connection) on every navigation.
+  const pathRef = useRef(path);
+  useEffect(() => {
+    pathRef.current = path;
+  }, [path]);
+
+  // The device's current page and physical key presses stream in over
+  // `/api/ws`, so this GUI's notion of device state never drifts from what's
+  // actually on screen — including a snapshot on (re)connect.
+  useEffect(() => {
+    return subscribeDeviceEvents((event) => {
+      if (event.type === 'page_changed') {
+        // Follow the device's navigation in the grid too — but only refresh locally
+        if (event.path !== formatPagePath(pathRef.current)) {
+          setSelectedKey(null);
+          refresh(parsePagePath(event.path));
+        }
+        return;
+      }
+      if (event.path !== formatPagePath(pathRef.current)) return;
+      setFlashedKey(event.id);
+      window.setTimeout(() => {
+        setFlashedKey((current) => (current === event.id ? null : current));
+      }, 200);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function navigateTo(newPath: PagePath) {
     setSelectedKey(null);
     // Doesn't need to wait on the device push below (a JPEG encode + USB
@@ -66,9 +94,7 @@ function App() {
 
     setBusy(true);
     try {
-      // Best-effort: failures surface via PageBar's device-mismatch notice.
       await activatePage(newPath);
-      setCurrentDevicePath(newPath);
     } catch {
       // ignored — see above
     } finally {
@@ -208,11 +234,7 @@ function App() {
         </div>
       )}
 
-      <PageBar
-        path={path}
-        currentDevicePath={currentDevicePath}
-        onNavigate={navigateTo}
-      />
+      <PageBar path={path} onNavigate={navigateTo} />
 
       {clipboard && (
         <p className="-mt-4 text-xs text-text opacity-70">
@@ -235,6 +257,7 @@ function App() {
             keys={keys}
             version={version}
             selectedKey={selectedKey}
+            flashedKey={flashedKey}
             busy={busy}
             setBusy={setBusy}
             setError={setError}

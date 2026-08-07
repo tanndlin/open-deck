@@ -9,6 +9,8 @@ interface KeyTileProps {
   config: KeyConfig;
   version: number;
   selected: boolean;
+  /** True briefly when this key was just physically pressed on the device. */
+  flashed: boolean;
   onClick: (id: number) => void;
   drag: KeyTileDragHandlers;
 }
@@ -19,6 +21,7 @@ export function KeyTile({
   config,
   version,
   selected,
+  flashed,
   onClick,
   drag,
 }: KeyTileProps) {
@@ -45,7 +48,7 @@ export function KeyTile({
       type="button"
       className={`relative aspect-square cursor-pointer overflow-hidden rounded-[10px] border p-0 hover:border-accent-border ${
         selected || dragOver ? 'border-accent-border' : 'border-border'
-      } bg-code-bg`}
+      } ${flashed ? 'ring-2 ring-accent-border' : ''} bg-code-bg`}
       onClick={() => onClick(id)}
       {...dragHandlers}
     >
