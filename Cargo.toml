@@ -19,14 +19,11 @@ tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "
 ureq = "3.3.0"
 url = "2.5.8"
 
-[target."cfg(windows)".dependencies]
-windows-icons = "0.3.0"
+[target.'cfg(windows)'.dependencies]
+windows-icons = "0.4.0"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
-
-[patch.crates-io]
-windows-icons = { path = "vendor/windows-icons" }
 
 [profile.release]
 strip = true
