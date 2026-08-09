@@ -145,6 +145,9 @@ fn parse_key(name: &str) -> Option<Key> {
 }
 
 #[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[cfg(target_os = "windows")]
 fn shell_command(command: &str) -> std::process::Command {
     use std::os::windows::process::CommandExt;
 
@@ -153,6 +156,7 @@ fn shell_command(command: &str) -> std::process::Command {
     // cmd.exe doesn't understand and mangles into "not recognized" errors.
     let mut c = std::process::Command::new("cmd");
     c.raw_arg(format!("/C {command}"));
+    c.creation_flags(CREATE_NO_WINDOW);
     c
 }
 
@@ -171,6 +175,7 @@ fn open_url_command(url: &str) -> std::process::Command {
     let escaped_url = url.replace('"', "%22");
     let mut c = std::process::Command::new("cmd");
     c.raw_arg(format!("/C start \"\" \"{escaped_url}\""));
+    c.creation_flags(CREATE_NO_WINDOW);
     c
 }
 
