@@ -3,13 +3,14 @@
 
 use std::sync::{Arc, Mutex};
 
-use hidapi::{HidApi, HidDevice};
+use hidapi::HidApi;
 use tokio::sync::broadcast;
 
 use crate::api::{ServerEvent, format_page_path};
 use crate::config::{KeyConfigMap, load_key_config, page_at};
 use crate::icon_cache::IconCache;
 use crate::push_image::{clear_all_keys, load_key_icons, precache_all_icons, set_back_arrow_icon};
+use crate::stream_deck::StreamDeck;
 
 mod action;
 mod api;
@@ -19,11 +20,10 @@ mod discord;
 mod icon_cache;
 mod infer_icon;
 mod push_image;
+mod stream_deck;
 mod title;
 
-const ELGATO_VID: u16 = 0x0fd9;
-const STREAMDECK_MK2_PID: u16 = 0x006d;
-const KEY_COUNT: u8 = 15;
+const KEY_COUNT: u8 = StreamDeck::KEY_COUNT;
 const CONFIG_FILE_NAME: &str = "config.json";
 const API_ADDR: &str = "127.0.0.1:3000";
 
@@ -32,7 +32,7 @@ const BACK_KEY: u8 = 0;
 
 /// State shared between the HID polling loop and the REST API.
 struct AppState {
-    device: Mutex<HidDevice>,
+    device: Mutex<StreamDeck>,
     /// The home page; subpages nest inside their keys' `folder` fields.
     root: Mutex<KeyConfigMap>,
     /// Key indices from home to the page currently pushed onto the device.
@@ -71,33 +71,13 @@ pub(crate) fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()
     Ok(())
 }
 
-/// Retries opening the Stream Deck until it succeeds, so starting the app
-/// before the device is plugged in (or while it's disconnected) doesn't
-/// crash it — it just waits. Logs once per distinct failure, not on every attempt.
-fn open_device_with_retry(hid: &HidApi) -> HidDevice {
-    let mut last_error: Option<String> = None;
-    loop {
-        match hid.open(ELGATO_VID, STREAMDECK_MK2_PID) {
-            Ok(device) => return device,
-            Err(e) => {
-                let message = e.to_string();
-                if last_error.as_deref() != Some(message.as_str()) {
-                    eprintln!("Stream Deck not found ({e}); waiting for it to connect...");
-                    last_error = Some(message);
-                }
-                std::thread::sleep(std::time::Duration::from_secs(2));
-            }
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let hid = HidApi::new()?;
 
     #[cfg(debug_assertions)]
     for dev in hid.device_list() {
-        if dev.vendor_id() == ELGATO_VID {
+        if dev.vendor_id() == stream_deck::VENDOR_ID {
             println!(
                 "Found: {:?} PID={:#06x}",
                 dev.product_string(),
@@ -106,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let device = open_device_with_retry(&hid);
+    let device = StreamDeck::open_with_retry(&hid);
     let icon_cache = IconCache::new();
 
     clear_all_keys(&device, &icon_cache)?;
@@ -136,7 +116,31 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let poll_state = state.clone();
-    std::thread::spawn(move || poll_keys(&poll_state, hid));
+    std::thread::spawn(move || {
+        StreamDeck::poll_keys(
+            &poll_state.device,
+            hid,
+            |key_id| {
+                println!("Key {key_id} pressed");
+                // Path as shown at press time — run_key_action may itself
+                // change it (folder/back navigation), which fires its own
+                // PageChanged broadcast via switch_to_path.
+                let _ = poll_state.events.send(ServerEvent::KeyPressed {
+                    path: format_page_path(&poll_state.current_path.lock().unwrap()),
+                    id: key_id,
+                });
+                run_key_action(&poll_state, key_id);
+            },
+            || {
+                // The newly (re)connected device can start blank, so redraw
+                // whatever page was on screen before the disconnect.
+                let path = poll_state.current_path.lock().unwrap().clone();
+                if let Err(e) = switch_to_path(&poll_state, &path) {
+                    eprintln!("Failed to refresh icons after reconnect: {e}");
+                }
+            },
+        );
+    });
 
     // Warms the cache for icons outside the home page (nested folders, plus
     // anything on the home page that failed above) so opening a folder later
@@ -154,95 +158,6 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, router).await?;
 
     Ok(())
-}
-
-fn poll_keys(state: &AppState, mut hid: HidApi) {
-    let mut buf = [0u8; 512];
-    let header_len = 4;
-    let mut pressed = [false; KEY_COUNT as usize];
-    // Tracks the last-seen read error so a disconnected device (which errors
-    // on every read instead of timing out) logs once instead of spamming.
-    let mut last_error: Option<String> = None;
-
-    loop {
-        let read_result = {
-            let device = state.device.lock().unwrap();
-            device.read(&mut buf)
-        };
-
-        match read_result {
-            Ok(0) => {
-                // timeout — no state change, keep polling
-                last_error = None;
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Ok(n) => {
-                last_error = None;
-                // buf[0] = report ID (0x01)
-                // buf[1..4] = header bytes to skip
-                // buf[4..n] = one byte per key, 0x01 = pressed, 0x00 = released
-                let key_states = &buf[header_len..n];
-
-                for (key_index, &key_state) in key_states.iter().enumerate() {
-                    if key_index >= pressed.len() {
-                        break;
-                    }
-                    let is_pressed = key_state == 0x01;
-                    // only fire on the release->press edge, not every report
-                    // while the key is held down
-                    if is_pressed && !pressed[key_index] {
-                        println!("Key {key_index} pressed");
-                        // key_index < pressed.len() == KEY_COUNT, checked above.
-                        #[allow(clippy::cast_possible_truncation)]
-                        let key_id = key_index as u8;
-                        // Path as shown at press time — run_key_action may itself
-                        // change it (folder/back navigation), which fires its own
-                        // PageChanged broadcast via switch_to_path.
-                        let _ = state.events.send(ServerEvent::KeyPressed {
-                            path: format_page_path(&state.current_path.lock().unwrap()),
-                            id: key_id,
-                        });
-                        run_key_action(state, key_id);
-                    }
-                    pressed[key_index] = is_pressed;
-                }
-            }
-            Err(e) => {
-                let message = e.to_string();
-                if last_error.as_deref() != Some(message.as_str()) {
-                    eprintln!("HID read error: {e}");
-                    last_error = Some(message);
-                }
-
-                if let Some(device) = try_reopen_device(&mut hid) {
-                    println!("Stream Deck reconnected");
-                    *state.device.lock().unwrap() = device;
-                    // The newly opened device can start blank, so redraw whatever
-                    // page was on screen before the disconnect.
-                    let path = state.current_path.lock().unwrap().clone();
-                    if let Err(e) = switch_to_path(state, &path) {
-                        eprintln!("Failed to refresh icons after reconnect: {e}");
-                    }
-                    pressed = [false; KEY_COUNT as usize];
-                    last_error = None;
-                }
-
-                // A disconnected device errors on every read instead of
-                // timing out like an idle one does, so without this sleep
-                // the loop would busy-spin as fast as the OS returns errors.
-                std::thread::sleep(std::time::Duration::from_millis(500));
-            }
-        }
-    }
-}
-
-/// Rescans for HID devices and tries to open the Stream Deck, for use after a
-/// read error that suggests it was unplugged
-fn try_reopen_device(hid: &mut HidApi) -> Option<HidDevice> {
-    hid.refresh_devices().ok()?;
-    let device = hid.open(ELGATO_VID, STREAMDECK_MK2_PID).ok()?;
-    device.set_blocking_mode(false).ok()?;
-    Some(device)
 }
 
 fn run_key_action(state: &AppState, key: u8) {
@@ -277,10 +192,7 @@ fn run_key_action(state: &AppState, key: u8) {
     }
 
     if let Some(action) = action {
-        // Off the polling thread: most actions are near-instant, but a
-        // Discord join can block for seconds (or until the user dismisses
-        // an "Authorize" dialog), which would otherwise stall every other
-        // key press until it resolves.
+        // Spawn thread to not block
         std::thread::spawn(move || action.execute());
     }
 }
