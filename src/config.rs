@@ -6,12 +6,12 @@ use serde::{Deserialize, Serialize};
 use crate::action::Action;
 
 /// Directory where all user config files live: `~/.open-deck`. Created if missing.
-pub fn config_dir() -> PathBuf {
+pub fn config_dir() -> anyhow::Result<PathBuf> {
     let dir = home_dir()
-        .expect("could not determine home directory")
+        .ok_or_else(|| anyhow::anyhow!("could not determine home directory"))?
         .join(".open-deck");
     let _ = std::fs::create_dir_all(&dir);
-    dir
+    Ok(dir)
 }
 
 #[cfg(windows)]

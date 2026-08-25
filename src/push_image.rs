@@ -27,8 +27,8 @@ fn encode_key_image(image: &DynamicImage, title: Option<&str>) -> anyhow::Result
     // Fit (not stretch) into the key's bounds, then center on a padded square canvas.
     let fitted = image.resize(ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3);
     let mut canvas = image::RgbaImage::new(ICON_SIZE, ICON_SIZE);
-    let x_offset = i64::from((ICON_SIZE - fitted.width()) / 2);
-    let y_offset = i64::from((ICON_SIZE - fitted.height()) / 2);
+    let x_offset = i64::from(ICON_SIZE.saturating_sub(fitted.width()) / 2);
+    let y_offset = i64::from(ICON_SIZE.saturating_sub(fitted.height()) / 2);
     image::imageops::overlay(&mut canvas, &fitted.to_rgba8(), x_offset, y_offset);
 
     if let Some(title) = title.map(str::trim).filter(|t| !t.is_empty()) {
@@ -44,7 +44,11 @@ fn encode_key_image(image: &DynamicImage, title: Option<&str>) -> anyhow::Result
         let alpha = f32::from(a) / 255.0;
         // r, g, b, alpha are all bounded such that the blended result always
         // fits in 0..=255.
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::as_conversions
+        )]
         let blended = [
             (f32::from(r) * alpha).round() as u8,
             (f32::from(g) * alpha).round() as u8,
@@ -67,10 +71,12 @@ fn encode_key_image(image: &DynamicImage, title: Option<&str>) -> anyhow::Result
 /// busts the cache even when the underlying icon (identified by `base`)
 /// doesn't. NUL-separated so it can't collide with a real `base`.
 fn with_title_suffix<'a>(base: &'a str, title: Option<&str>) -> std::borrow::Cow<'a, str> {
-    match title.map(str::trim).filter(|t| !t.is_empty()) {
-        Some(t) => std::borrow::Cow::Owned(format!("{base}\0title\0{t}")),
-        None => std::borrow::Cow::Borrowed(base),
-    }
+    title
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map_or(std::borrow::Cow::Borrowed(base), |t| {
+            std::borrow::Cow::Owned(format!("{base}\0title\0{t}"))
+        })
 }
 
 /// Clears a key's image (sets it to solid black), still showing `title` if set.
@@ -210,6 +216,7 @@ pub fn load_key_icons(device: &StreamDeck, keys: &KeyConfigMap, cache: &IconCach
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use image::{Rgba, RgbaImage};
 

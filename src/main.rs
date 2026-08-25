@@ -1,8 +1,9 @@
 // Suppresses the console window in release builds; debug builds keep it so `cargo run` still shows output.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
+use anyhow::bail;
 use hidapi::HidApi;
 use tokio::sync::broadcast;
 
@@ -45,22 +46,25 @@ struct AppState {
 }
 
 /// Clears the device and pushes the page at `path` onto it, then marks it as active.
-pub(crate) fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()> {
-    let root = state.root.lock().unwrap();
+fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()> {
+    let root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
     let Some(page) = page_at(&root, path) else {
-        anyhow::bail!("no page at path {path:?}");
+        bail!("no page at path {path:?}");
     };
 
     // Key presses are routed by `current_path`, so it must switch before any
     // device I/O below — otherwise a mid-render failure leaves the screen
     // showing the new page while presses still resolve against the old one.
-    *state.current_path.lock().unwrap() = path.to_vec();
+    *state
+        .current_path
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = path.to_vec();
 
     let _ = state.events.send(ServerEvent::PageChanged {
         path: format_page_path(path),
     });
 
-    let device = state.device.lock().unwrap();
+    let device = state.device.lock().unwrap_or_else(PoisonError::into_inner);
     clear_all_keys(&device, &state.icon_cache)?;
     load_key_icons(&device, page, &state.icon_cache);
     // Matches KeyTile.tsx's isBackKey.
@@ -90,16 +94,14 @@ async fn main() -> anyhow::Result<()> {
     let icon_cache = IconCache::new();
 
     clear_all_keys(&device, &icon_cache)?;
-    let config_path = config::config_dir()
+    let config_path = config::config_dir()?
         .join(CONFIG_FILE_NAME)
         .to_string_lossy()
         .to_string();
-    let root = if let Some(root) = load_key_config(&config_path)? {
-        root
-    } else {
+    let root = load_key_config(&config_path)?.unwrap_or_else(|| {
         println!("No config at {config_path}, skipping");
         KeyConfigMap::new()
-    };
+    });
     load_key_icons(&device, &root, &icon_cache);
 
     device.set_blocking_mode(false)?;
@@ -126,7 +128,12 @@ async fn main() -> anyhow::Result<()> {
                 // change it (folder/back navigation), which fires its own
                 // PageChanged broadcast via switch_to_path.
                 let _ = poll_state.events.send(ServerEvent::KeyPressed {
-                    path: format_page_path(&poll_state.current_path.lock().unwrap()),
+                    path: format_page_path(
+                        &poll_state
+                            .current_path
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner),
+                    ),
                     id: key_id,
                 });
                 run_key_action(&poll_state, key_id);
@@ -134,7 +141,11 @@ async fn main() -> anyhow::Result<()> {
             || {
                 // The newly (re)connected device can start blank, so redraw
                 // whatever page was on screen before the disconnect.
-                let path = poll_state.current_path.lock().unwrap().clone();
+                let path = poll_state
+                    .current_path
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone();
                 if let Err(e) = switch_to_path(&poll_state, &path) {
                     eprintln!("Failed to refresh icons after reconnect: {e}");
                 }
@@ -147,7 +158,11 @@ async fn main() -> anyhow::Result<()> {
     // doesn't stall on a fetch. Runs off the startup path entirely.
     let precache_state = state.clone();
     std::thread::spawn(move || {
-        let root = precache_state.root.lock().unwrap().clone();
+        let root = precache_state
+            .root
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
         precache_all_icons(&root, &precache_state.icon_cache);
     });
 
@@ -161,18 +176,24 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn run_key_action(state: &AppState, key: u8) {
-    let current_path = state.current_path.lock().unwrap().clone();
+    let current_path = state
+        .current_path
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
 
     if key == BACK_KEY && !current_path.is_empty() {
-        let parent_path = &current_path[..current_path.len() - 1];
-        if let Err(e) = switch_to_path(state, parent_path) {
+        let parent_len = current_path.len().saturating_sub(1);
+        if let Some(parent_path) = current_path.get(..parent_len)
+            && let Err(e) = switch_to_path(state, parent_path)
+        {
             eprintln!("Failed to go up from {current_path:?}: {e}");
         }
         return;
     }
 
     let (is_folder, action) = {
-        let root = state.root.lock().unwrap();
+        let root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(page) = page_at(&root, &current_path) else {
             return;
         };

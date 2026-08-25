@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 pub struct CachedIcon {
     pub bytes: Vec<u8>,
@@ -23,7 +23,12 @@ impl IconCache {
     /// `url` looks like a guessed `/favicon.ico` path, falls back to
     /// [`crate::infer_icon::recover_favicon`] before giving up.
     pub fn get_or_fetch(&self, url: &str) -> Result<Arc<CachedIcon>, String> {
-        if let Some(icon) = self.urls.lock().unwrap().get(url) {
+        if let Some(icon) = self
+            .urls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(url)
+        {
             return Ok(Arc::clone(icon));
         }
 
@@ -37,7 +42,7 @@ impl IconCache {
         let icon = Arc::new(icon);
         self.urls
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .insert(url.to_string(), Arc::clone(&icon));
         Ok(icon)
     }
@@ -68,14 +73,19 @@ impl IconCache {
         key: &str,
         encode: impl FnOnce() -> anyhow::Result<Vec<u8>>,
     ) -> anyhow::Result<Arc<Vec<u8>>> {
-        if let Some(jpeg) = self.encoded.lock().unwrap().get(key) {
+        if let Some(jpeg) = self
+            .encoded
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(key)
+        {
             return Ok(Arc::clone(jpeg));
         }
 
         let jpeg = Arc::new(encode()?);
         self.encoded
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .insert(key.to_string(), Arc::clone(&jpeg));
         Ok(jpeg)
     }

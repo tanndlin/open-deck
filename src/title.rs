@@ -51,8 +51,7 @@ pub fn draw_title(canvas: &mut image::RgbaImage, title: &str) {
 
     let bar_height = TITLE_BAR_HEIGHT.min(ICON_SIZE);
     // bar_y fits in i32: ICON_SIZE is a small fixed constant (72).
-    #[allow(clippy::cast_possible_wrap)]
-    let bar_y = (ICON_SIZE - bar_height) as i32;
+    let bar_y = i32::try_from(ICON_SIZE.saturating_sub(bar_height)).unwrap_or(0);
     imageproc::drawing::draw_filled_rect_mut(
         canvas,
         Rect::at(0, bar_y).of_size(ICON_SIZE, bar_height),
@@ -60,15 +59,14 @@ pub fn draw_title(canvas: &mut image::RgbaImage, title: &str) {
     );
 
     let (text_width, _) = imageproc::drawing::text_size(scale, &font, title);
-    let x = ((i64::from(ICON_SIZE) - i64::from(text_width)) / 2).max(0);
+    let x = i64::from(ICON_SIZE).saturating_sub(i64::from(text_width)) / 2;
     // x fits in i32: it's clamped to >= 0 and bounded above by ICON_SIZE.
-    #[allow(clippy::cast_possible_truncation)]
-    let x = x as i32;
+    let x = i32::try_from(x.max(0)).unwrap_or(0);
     imageproc::drawing::draw_text_mut(
         canvas,
         Rgba([255, 255, 255, 255]),
         x,
-        bar_y + 2,
+        bar_y.saturating_add(2),
         scale,
         &font,
         title,

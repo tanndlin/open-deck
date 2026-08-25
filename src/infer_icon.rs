@@ -113,11 +113,12 @@ fn command_icon(command: &str, cache_dir: &Path) -> Option<String> {
 }
 
 #[cfg(not(windows))]
-fn command_icon(_command: &str, _cache_dir: &Path) -> Option<String> {
+const fn command_icon(_command: &str, _cache_dir: &Path) -> Option<String> {
     None
 }
 
 #[cfg(all(test, windows))]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

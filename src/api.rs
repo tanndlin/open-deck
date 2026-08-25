@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 
 use axum::{
     Json, Router,
@@ -87,7 +87,12 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     let mut events = state.events.subscribe();
 
     let snapshot = ServerEvent::PageChanged {
-        path: format_page_path(&state.current_path.lock().unwrap()),
+        path: format_page_path(
+            &state
+                .current_path
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        ),
     };
     if !send_event(&mut socket, &snapshot).await {
         return;
@@ -157,7 +162,7 @@ fn parse_page_path(raw: &str) -> Result<Vec<u8>, ApiError> {
         .collect()
 }
 
-pub(crate) fn format_page_path(path: &[u8]) -> String {
+pub fn format_page_path(path: &[u8]) -> String {
     if path.is_empty() {
         "home".to_string()
     } else {
@@ -174,7 +179,7 @@ fn page_not_found(raw_path: &str) -> ApiError {
 
 /// Persists the page tree, dropping now-empty key entries so the config file doesn't accumulate dead keys.
 fn persist(state: &AppState) -> Result<(), ApiError> {
-    let mut root = state.root.lock().unwrap();
+    let mut root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
     prune_empty_keys(&mut root);
     save_key_config(&state.config_path, &root).map_err(|e| {
         (
@@ -201,7 +206,11 @@ struct CurrentPageResponse {
 }
 
 async fn current_page(State(state): State<Arc<AppState>>) -> Json<CurrentPageResponse> {
-    let path = state.current_path.lock().unwrap().clone();
+    let path = state
+        .current_path
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
     Json(CurrentPageResponse {
         path: format_page_path(&path),
     })
@@ -249,9 +258,14 @@ async fn list_keys(
     Path(raw_path): Path<String>,
 ) -> Result<Json<std::collections::HashMap<u8, KeyConfigView>>, ApiError> {
     let path = parse_page_path(&raw_path)?;
-    let root = state.root.lock().unwrap();
+    let root = state
+        .root
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let page = page_at(&root, &path).ok_or_else(|| page_not_found(&raw_path))?;
-    Ok(Json(page.iter().map(|(&id, c)| (id, c.into())).collect()))
+    let result = page.iter().map(|(&id, c)| (id, c.into())).collect();
+    drop(root);
+    Ok(Json(result))
 }
 
 async fn get_key(
@@ -259,12 +273,16 @@ async fn get_key(
     Path((raw_path, id)): Path<(String, u8)>,
 ) -> Result<Json<KeyConfigView>, ApiError> {
     let path = parse_page_path(&raw_path)?;
-    let root = state.root.lock().unwrap();
+    let root = state
+        .root
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let page = page_at(&root, &path).ok_or_else(|| page_not_found(&raw_path))?;
-    Ok(Json(page.get(&id).map_or_else(
-        || (&KeyConfig::default()).into(),
-        Into::into,
-    )))
+    let result = page
+        .get(&id)
+        .map_or_else(|| (&KeyConfig::default()).into(), Into::into);
+    drop(root);
+    Ok(Json(result))
 }
 
 async fn get_key_icon(
@@ -272,12 +290,17 @@ async fn get_key_icon(
     Path((raw_path, id)): Path<(String, u8)>,
 ) -> Result<Json<String>, ApiError> {
     let path = parse_page_path(&raw_path)?;
-    let root = state.root.lock().unwrap();
+    let root = state
+        .root
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let page = page_at(&root, &path).ok_or_else(|| page_not_found(&raw_path))?;
-    match page.get(&id).and_then(|c| c.icon.clone()) {
-        Some(icon) => Ok(Json(icon)),
-        None => Err((StatusCode::NOT_FOUND, format!("no icon set for key {id}"))),
-    }
+    let icon = page.get(&id).and_then(|c| c.icon.clone());
+    drop(root);
+    icon.map_or_else(
+        || Err((StatusCode::NOT_FOUND, format!("no icon set for key {id}"))),
+        |icon| Ok(Json(icon)),
+    )
 }
 
 async fn get_key_image(
@@ -286,13 +309,15 @@ async fn get_key_image(
 ) -> Result<Response, ApiError> {
     let path = parse_page_path(&raw_path)?;
     let (icon, is_folder) = {
-        let root = state.root.lock().unwrap();
+        let root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
         let page = page_at(&root, &path).ok_or_else(|| page_not_found(&raw_path))?;
         let config = page.get(&id);
-        (
+        let result = (
             config.and_then(|c| c.icon.clone()),
             config.is_some_and(|c| c.folder.is_some()),
-        )
+        );
+        drop(root);
+        result
     };
     let Some(icon) = icon else {
         if is_folder {
@@ -341,9 +366,15 @@ async fn apply_icon(
 ) -> Result<(), ApiError> {
     // Only push to the device if the edited page is the one currently shown
     // — otherwise it's picked up next time it's activated.
-    if path == state.current_path.lock().unwrap().as_slice() {
+    if path
+        == state
+            .current_path
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_slice()
+    {
         let title = {
-            let root = state.root.lock().unwrap();
+            let root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
             page_at(&root, path)
                 .and_then(|p| p.get(&id))
                 .and_then(|c| c.title.clone())
@@ -353,7 +384,10 @@ async fn apply_icon(
         let icon_state = Arc::clone(state);
         let icon_path = icon.clone();
         tokio::task::spawn_blocking(move || {
-            let device = icon_state.device.lock().unwrap();
+            let device = icon_state
+                .device
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
             set_key_icon(
                 &device,
                 id,
@@ -372,7 +406,7 @@ async fn apply_icon(
         })?;
     }
 
-    let mut root = state.root.lock().unwrap();
+    let mut root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
     let page =
         page_at_mut(&mut root, path).ok_or_else(|| page_not_found(&format_page_path(path)))?;
     page.entry(id).or_default().icon = Some(icon);
@@ -445,14 +479,19 @@ async fn clear_key_icon(
     check_key_range(id)?;
     let path = parse_page_path(&raw_path)?;
 
-    if path == *state.current_path.lock().unwrap() {
+    if path
+        == *state
+            .current_path
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    {
         let title = {
-            let root = state.root.lock().unwrap();
+            let root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
             page_at(&root, &path)
                 .and_then(|p| p.get(&id))
                 .and_then(|c| c.title.clone())
         };
-        let device = state.device.lock().unwrap();
+        let device = state.device.lock().unwrap_or_else(PoisonError::into_inner);
         clear_key_image(&device, id, title.as_deref(), &state.icon_cache).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -461,7 +500,7 @@ async fn clear_key_icon(
         })?;
     }
 
-    let mut root = state.root.lock().unwrap();
+    let mut root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
     let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
     if let Some(config) = page.get_mut(&id) {
         config.icon = None;
@@ -485,21 +524,32 @@ async fn apply_title(
     id: u8,
     title: Option<String>,
 ) -> Result<(), ApiError> {
-    if path == state.current_path.lock().unwrap().as_slice() {
+    if path
+        == state
+            .current_path
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_slice()
+    {
         let (icon, is_folder) = {
-            let root = state.root.lock().unwrap();
+            let root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
             let config = page_at(&root, path).and_then(|p| p.get(&id));
-            (
+            let result = (
                 config.and_then(|c| c.icon.clone()),
                 config.is_some_and(|c| c.folder.is_some()),
-            )
+            );
+            drop(root);
+            result
         };
 
         // May block on network I/O (see activate_page).
         let push_state = Arc::clone(state);
         let push_title = title.clone();
         tokio::task::spawn_blocking(move || {
-            let device = push_state.device.lock().unwrap();
+            let device = push_state
+                .device
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
             match &icon {
                 Some(icon_path) => set_key_icon(
                     &device,
@@ -524,7 +574,7 @@ async fn apply_title(
         })?;
     }
 
-    let mut root = state.root.lock().unwrap();
+    let mut root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
     let page =
         page_at_mut(&mut root, path).ok_or_else(|| page_not_found(&format_page_path(path)))?;
     page.entry(id).or_default().title = title;
@@ -559,12 +609,14 @@ async fn get_key_action(
     Path((raw_path, id)): Path<(String, u8)>,
 ) -> Result<Json<Action>, ApiError> {
     let path = parse_page_path(&raw_path)?;
-    let root = state.root.lock().unwrap();
+    let root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
     let page = page_at(&root, &path).ok_or_else(|| page_not_found(&raw_path))?;
-    match page.get(&id).and_then(|c| c.action.clone()) {
-        Some(action) => Ok(Json(action)),
-        None => Err((StatusCode::NOT_FOUND, format!("no action set for key {id}"))),
-    }
+    let action = page.get(&id).and_then(|c| c.action.clone());
+    drop(root);
+    action.map_or_else(
+        || Err((StatusCode::NOT_FOUND, format!("no action set for key {id}"))),
+        |action| Ok(Json(action)),
+    )
 }
 
 async fn set_key_action(
@@ -576,7 +628,7 @@ async fn set_key_action(
     let path = parse_page_path(&raw_path)?;
 
     let has_icon = {
-        let mut root = state.root.lock().unwrap();
+        let mut root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
         let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
         let config = page.entry(id).or_default();
         if config.folder.is_some() {
@@ -586,7 +638,9 @@ async fn set_key_action(
             ));
         }
         config.action = Some(action.clone());
-        config.icon.is_some()
+        let has_icon = config.icon.is_some();
+        drop(root);
+        has_icon
     };
 
     persist(&state)?;
@@ -615,7 +669,7 @@ async fn clear_key_action(
     check_key_range(id)?;
     let path = parse_page_path(&raw_path)?;
 
-    let mut root = state.root.lock().unwrap();
+    let mut root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
     let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
     if let Some(config) = page.get_mut(&id) {
         config.action = None;
@@ -634,7 +688,7 @@ async fn create_folder(
     check_key_range(id)?;
     let path = parse_page_path(&raw_path)?;
 
-    let mut root = state.root.lock().unwrap();
+    let mut root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
     let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
     let config = page.entry(id).or_default();
     if config.folder.is_none() {
@@ -656,9 +710,11 @@ async fn delete_folder(
     let path = parse_page_path(&raw_path)?;
 
     let removed = {
-        let mut root = state.root.lock().unwrap();
+        let mut root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
         let page = page_at_mut(&mut root, &path).ok_or_else(|| page_not_found(&raw_path))?;
-        page.get_mut(&id).is_some_and(|c| c.folder.take().is_some())
+        let removed = page.get_mut(&id).is_some_and(|c| c.folder.take().is_some());
+        drop(root);
+        removed
     };
 
     if !removed {
@@ -667,7 +723,11 @@ async fn delete_folder(
 
     let mut folder_path = path.clone();
     folder_path.push(id);
-    let device_was_inside = state.current_path.lock().unwrap().starts_with(&folder_path);
+    let device_was_inside = state
+        .current_path
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .starts_with(&folder_path);
 
     persist(&state)?;
 
@@ -705,8 +765,8 @@ async fn move_key(
     // A folder can't be moved into its own nested page — that would
     // disconnect it from the tree reachable from the root.
     if to_path.len() > from_path.len()
-        && to_path[..from_path.len()] == from_path[..]
-        && to_path[from_path.len()] == req.from_id
+        && to_path.get(..from_path.len()) == Some(from_path.as_slice())
+        && to_path.get(from_path.len()) == Some(&req.from_id)
     {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -715,7 +775,7 @@ async fn move_key(
     }
 
     {
-        let mut root = state.root.lock().unwrap();
+        let mut root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
 
         let moved = {
             let from_page =
@@ -736,14 +796,20 @@ async fn move_key(
         if let Some(cfg) = displaced {
             // Guaranteed to exist: we just looked it up above, and the lock
             // on `root` has been held continuously since.
-            let from_page = page_at_mut(&mut root, &from_path).unwrap();
+            let from_page =
+                page_at_mut(&mut root, &from_path).ok_or_else(|| page_not_found(&req.from_path))?;
             from_page.insert(req.from_id, cfg);
         }
+        drop(root);
     }
 
     persist(&state)?;
 
-    let current = state.current_path.lock().unwrap().clone();
+    let current = state
+        .current_path
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
     if current == from_path || current == to_path {
         // May block on network I/O (see activate_page).
         let result = tokio::task::spawn_blocking(move || switch_to_path(&state, &current))

@@ -37,12 +37,12 @@ fn default_redirect_uri() -> String {
     "http://127.0.0.1:3000/api/discord/callback".to_string()
 }
 
-fn discord_config_path() -> PathBuf {
-    config_dir().join(DISCORD_CONFIG_FILE_NAME)
+fn discord_config_path() -> anyhow::Result<PathBuf> {
+    Ok(config_dir()?.join(DISCORD_CONFIG_FILE_NAME))
 }
 
 fn load_config() -> anyhow::Result<DiscordConfig> {
-    let path = discord_config_path();
+    let path = discord_config_path()?;
     let contents = std::fs::read_to_string(&path).map_err(|e| {
         anyhow::anyhow!(
             "no {} found ({e}); create one with client_id/client_secret \
@@ -55,7 +55,7 @@ fn load_config() -> anyhow::Result<DiscordConfig> {
 
 fn save_config(config: &DiscordConfig) -> anyhow::Result<()> {
     let contents = serde_json::to_string_pretty(config)?;
-    std::fs::write(discord_config_path(), contents)?;
+    std::fs::write(discord_config_path()?, contents)?;
     Ok(())
 }
 
@@ -79,15 +79,21 @@ fn open_session() -> anyhow::Result<PipeStream> {
 /// one first if there isn't one yet. On failure the session is dropped so
 /// the next call reconnects instead of repeating the same error.
 fn with_session<T>(f: impl FnOnce(&mut PipeStream) -> anyhow::Result<T>) -> anyhow::Result<T> {
-    let mut guard = SESSION.lock().unwrap();
+    let mut guard = SESSION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if guard.is_none() {
         *guard = Some(open_session()?);
     }
 
-    match f(guard.as_mut().unwrap()) {
+    let pipe = guard
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("Discord session unexpectedly empty"))?;
+    match f(pipe) {
         Ok(value) => Ok(value),
         Err(e) => {
             *guard = None;
+            drop(guard);
             Err(e)
         }
     }
@@ -183,9 +189,9 @@ fn connect_pipe() -> anyhow::Result<PipeStream> {
 
 fn write_frame(pipe: &mut PipeStream, opcode: u32, payload: &Value) -> anyhow::Result<()> {
     let body = serde_json::to_vec(payload)?;
+    let body_len = u32::try_from(body.len()).map_err(|_| anyhow::anyhow!("payload too large"))?;
     pipe.write_all(&opcode.to_le_bytes())?;
-    #[allow(clippy::cast_possible_truncation)]
-    pipe.write_all(&(body.len() as u32).to_le_bytes())?;
+    pipe.write_all(&body_len.to_le_bytes())?;
     pipe.write_all(&body)?;
     pipe.flush()?;
     Ok(())
@@ -194,7 +200,8 @@ fn write_frame(pipe: &mut PipeStream, opcode: u32, payload: &Value) -> anyhow::R
 fn read_frame(pipe: &mut PipeStream) -> anyhow::Result<Value> {
     let mut header = [0u8; 8];
     pipe.read_exact(&mut header)?;
-    let len = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
+    let len = u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
+    let len = usize::try_from(len).map_err(|_| anyhow::anyhow!("frame length overflowed usize"))?;
     let mut body = vec![0u8; len];
     pipe.read_exact(&mut body)?;
     Ok(serde_json::from_slice(&body)?)
@@ -217,7 +224,9 @@ fn handshake(pipe: &mut PipeStream, client_id: &str) -> anyhow::Result<()> {
 /// nonce, skipping any unsolicited `DISPATCH` events in between.
 fn send_command(pipe: &mut PipeStream, cmd: &str, args: &Value) -> anyhow::Result<Value> {
     let nonce = {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
         format!("{}-{}", now.as_secs(), now.subsec_nanos())
     };
     write_frame(
@@ -352,12 +361,14 @@ fn request_token(form: &[(&str, &str)]) -> anyhow::Result<(String, String)> {
         .map_err(|e| anyhow::anyhow!("failed to read token response: {e}"))?;
     let body: Value = serde_json::from_str(&body_str)?;
 
-    let access_token = body["access_token"]
-        .as_str()
+    let access_token = body
+        .get("access_token")
+        .and_then(Value::as_str)
         .ok_or_else(|| anyhow::anyhow!("token response missing access_token: {body}"))?
         .to_string();
-    let refresh_token = body["refresh_token"]
-        .as_str()
+    let refresh_token = body
+        .get("refresh_token")
+        .and_then(Value::as_str)
         .ok_or_else(|| anyhow::anyhow!("token response missing refresh_token: {body}"))?
         .to_string();
 

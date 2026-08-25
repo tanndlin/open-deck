@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use hidapi::{HidApi, HidDevice};
 
-pub(crate) const VENDOR_ID: u16 = 0x0fd9;
+pub const VENDOR_ID: u16 = 0x0fd9;
 const PRODUCT_ID: u16 = 0x006d;
 const KEY_COUNT: u8 = 15;
 
@@ -17,13 +17,18 @@ const IMAGE_REPORT_LEN: usize = 1024;
 const IMAGE_REPORT_HEADER_LEN: usize = 8;
 const IMAGE_REPORT_PAYLOAD_LEN: usize = IMAGE_REPORT_LEN - IMAGE_REPORT_HEADER_LEN;
 
+// Always safe: KEY_COUNT is a small compile-time constant. Isolated here so
+// `as` is deny-listed everywhere else in the file.
+#[allow(clippy::as_conversions)]
+const KEY_COUNT_USIZE: usize = KEY_COUNT as usize;
+
 /// Owns the HID handle to a physical Stream Deck and is the only thing that
 /// speaks its wire protocol
 pub struct StreamDeck {
     device: HidDevice,
     /// Per-key state from the last report, so polling can fire only on the
     /// release->press edge instead of on every report while a key is held.
-    pressed: [bool; KEY_COUNT as usize],
+    pressed: [bool; KEY_COUNT_USIZE],
 }
 
 impl StreamDeck {
@@ -38,7 +43,7 @@ impl StreamDeck {
                 Ok(device) => {
                     return Self {
                         device,
-                        pressed: [false; KEY_COUNT as usize],
+                        pressed: [false; KEY_COUNT_USIZE],
                     };
                 }
                 Err(e) => {
@@ -61,7 +66,7 @@ impl StreamDeck {
         device.set_blocking_mode(false).ok()?;
         Some(Self {
             device,
-            pressed: [false; KEY_COUNT as usize],
+            pressed: [false; KEY_COUNT_USIZE],
         })
     }
 
@@ -82,19 +87,20 @@ impl StreamDeck {
 
         // buf[0] = report ID (0x01); buf[1..4] = header bytes to skip;
         // buf[4..n] = one byte per key, 0x01 = pressed, 0x00 = released.
-        let key_states = &buf[INPUT_REPORT_HEADER_LEN..n];
+        let key_states = buf.get(INPUT_REPORT_HEADER_LEN..n).unwrap_or(&[]);
         let mut newly_pressed = Vec::new();
         for (key_index, &key_state) in key_states.iter().enumerate() {
-            if key_index >= self.pressed.len() {
+            let Some(was_pressed) = self.pressed.get_mut(key_index) else {
                 break;
-            }
+            };
             let is_pressed = key_state == 0x01;
-            if is_pressed && !self.pressed[key_index] {
-                // key_index < self.pressed.len() == KEY_COUNT, checked above.
-                #[allow(clippy::cast_possible_truncation)]
-                newly_pressed.push(key_index as u8);
+            if is_pressed
+                && !*was_pressed
+                && let Ok(id) = u8::try_from(key_index)
+            {
+                newly_pressed.push(id);
             }
-            self.pressed[key_index] = is_pressed;
+            *was_pressed = is_pressed;
         }
         Ok(Some(newly_pressed))
     }
@@ -117,7 +123,9 @@ impl StreamDeck {
 
         loop {
             let poll_result = {
-                let mut d = device.lock().unwrap();
+                let mut d = device
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 d.poll_pressed_keys()
             };
 
@@ -142,7 +150,9 @@ impl StreamDeck {
 
                     if let Some(reopened) = Self::try_reopen(&mut hid) {
                         println!("Stream Deck reconnected");
-                        *device.lock().unwrap() = reopened;
+                        *device
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) = reopened;
                         on_reconnect();
                         last_error = None;
                     }
@@ -165,29 +175,33 @@ impl StreamDeck {
 
         while remaining > 0 {
             let chunk_len = remaining.min(IMAGE_REPORT_PAYLOAD_LEN);
-            let sent = page * IMAGE_REPORT_PAYLOAD_LEN;
+            let sent = page.saturating_mul(IMAGE_REPORT_PAYLOAD_LEN);
             let is_last = chunk_len == remaining;
 
             // chunk_len and page are split into wire-protocol low/high bytes;
             // both stay well within u16 range for any realistic icon size.
-            #[allow(clippy::cast_possible_truncation)]
+            let [len_lo, len_hi] = u16::try_from(chunk_len).unwrap_or(u16::MAX).to_le_bytes();
+            let [page_lo, page_hi] = u16::try_from(page).unwrap_or(u16::MAX).to_le_bytes();
             let mut packet = vec![
                 0x02,
                 0x07,
                 key,
                 u8::from(is_last),
-                (chunk_len & 0xff) as u8,
-                (chunk_len >> 8) as u8,
-                (page & 0xff) as u8,
-                (page >> 8) as u8,
+                len_lo,
+                len_hi,
+                page_lo,
+                page_hi,
             ];
-            packet.extend_from_slice(&jpeg[sent..sent + chunk_len]);
+            let chunk = jpeg
+                .get(sent..sent.saturating_add(chunk_len))
+                .ok_or_else(|| anyhow::anyhow!("image chunk out of range"))?;
+            packet.extend_from_slice(chunk);
             packet.resize(IMAGE_REPORT_LEN, 0);
 
             self.device.write(&packet)?;
 
-            remaining -= chunk_len;
-            page += 1;
+            remaining = remaining.saturating_sub(chunk_len);
+            page = page.saturating_add(1);
         }
 
         Ok(())

@@ -28,44 +28,44 @@ pub enum Action {
     },
     /// Runs each sub-action in order.
     Multi {
-        actions: Vec<Action>,
+        actions: Vec<Self>,
     },
 }
 
 impl Action {
     pub fn execute(&self) {
         match self {
-            Action::RunCommand { command } => {
+            Self::RunCommand { command } => {
                 if let Err(e) = shell_command(command).spawn() {
                     eprintln!("Failed to run command '{command}': {e}");
                 }
             }
-            Action::OpenUrl { url } => {
+            Self::OpenUrl { url } => {
                 if let Err(e) = open_url_command(url).spawn() {
                     eprintln!("Failed to open URL '{url}': {e}");
                 }
             }
-            Action::OpenFolder { path } => {
+            Self::OpenFolder { path } => {
                 if let Err(e) = open_folder_command(path).spawn() {
                     eprintln!("Failed to open folder '{path}': {e}");
                 }
             }
-            Action::TypeText { text } => {
+            Self::TypeText { text } => {
                 if let Err(e) = type_text(text) {
                     eprintln!("Failed to type text: {e}");
                 }
             }
-            Action::Hotkey { keys } => {
+            Self::Hotkey { keys } => {
                 if let Err(e) = press_hotkey(keys) {
                     eprintln!("Failed to send hotkey '{}': {e}", keys.join("+"));
                 }
             }
-            Action::DiscordJoinVoice { channel_id } => {
+            Self::DiscordJoinVoice { channel_id } => {
                 if let Err(e) = crate::discord::join_voice_channel(channel_id) {
                     eprintln!("Failed to join Discord voice channel '{channel_id}': {e}");
                 }
             }
-            Action::Multi { actions } => {
+            Self::Multi { actions } => {
                 for action in actions {
                     action.execute();
                 }
