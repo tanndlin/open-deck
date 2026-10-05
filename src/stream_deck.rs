@@ -17,6 +17,8 @@ const IMAGE_REPORT_LEN: usize = 1024;
 const IMAGE_REPORT_HEADER_LEN: usize = 8;
 const IMAGE_REPORT_PAYLOAD_LEN: usize = IMAGE_REPORT_LEN - IMAGE_REPORT_HEADER_LEN;
 
+const BRIGHTNESS_REPORT_LEN: usize = 32;
+
 // Always safe: KEY_COUNT is a small compile-time constant. Isolated here so
 // `as` is deny-listed everywhere else in the file.
 #[allow(clippy::as_conversions)]
@@ -164,6 +166,15 @@ impl StreamDeck {
                 }
             }
         }
+    }
+
+    pub fn set_brightness(&self, percent: u8) -> anyhow::Result<()> {
+        let mut report = [0u8; BRIGHTNESS_REPORT_LEN];
+        for (dst, src) in report.iter_mut().zip([0x03, 0x08, percent.min(100)]) {
+            *dst = src;
+        }
+        self.device.send_feature_report(&report)?;
+        Ok(())
     }
 
     /// Pushes a pre-encoded JPEG (see [`crate::push_image::ICON_SIZE`] for the

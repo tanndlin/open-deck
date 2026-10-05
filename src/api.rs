@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 use crate::action::Action;
-use crate::config::{KeyConfig, KeyConfigMap, page_at, page_at_mut, save_key_config};
+use crate::config::{KeyConfig, KeyConfigMap, page_at, page_at_mut, save_json};
 use crate::icon_cache::IconCache;
 use crate::infer_icon::infer_icon;
 use crate::push_image::{FOLDER_ICON_BYTES, clear_key_image, set_folder_icon, set_key_icon};
@@ -31,6 +31,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/key-count", get(key_count))
         .route("/api/current-page", get(current_page))
+        .route("/api/brightness", get(get_brightness).put(set_brightness))
         .route("/api/pages/{path}/activate", post(activate_page))
         .route("/api/pages/{path}/keys", get(list_keys))
         .route("/api/pages/{path}/keys/{id}", get(get_key))
@@ -181,7 +182,7 @@ fn page_not_found(raw_path: &str) -> ApiError {
 fn persist(state: &AppState) -> Result<(), ApiError> {
     let mut root = state.root.lock().unwrap_or_else(PoisonError::into_inner);
     prune_empty_keys(&mut root);
-    save_key_config(&state.config_path, &root).map_err(|e| {
+    save_json(&state.config_path, &*root).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("failed to save config: {e}"),
@@ -198,6 +199,50 @@ fn prune_empty_keys(page: &mut KeyConfigMap) {
     page.retain(|_, c| {
         c.icon.is_some() || c.title.is_some() || c.action.is_some() || c.folder.is_some()
     });
+}
+
+async fn get_brightness(State(state): State<Arc<AppState>>) -> Json<u8> {
+    Json(
+        state
+            .settings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .brightness,
+    )
+}
+
+async fn set_brightness(
+    State(state): State<Arc<AppState>>,
+    Json(percent): Json<u8>,
+) -> Result<StatusCode, ApiError> {
+    if percent > 100 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("brightness {percent} out of range (0-100)"),
+        ));
+    }
+
+    state
+        .device
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .set_brightness(percent)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
+
+    let mut settings = state
+        .settings
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    settings.brightness = percent;
+    save_json(&state.settings_path, &*settings).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to save settings: {e}"),
+        )
+    })?;
+    drop(settings);
+
+    Ok(StatusCode::OK)
 }
 
 #[derive(Serialize)]

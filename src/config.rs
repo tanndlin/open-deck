@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::action::Action;
 
@@ -66,19 +66,36 @@ pub fn page_at_mut<'a>(
 }
 
 /// Returns `Ok(None)` if `path` doesn't exist.
-pub fn load_key_config(path: &str) -> anyhow::Result<Option<KeyConfigMap>> {
-    let config_str = match std::fs::read_to_string(path) {
+pub fn load_json<T: DeserializeOwned>(path: &str) -> anyhow::Result<Option<T>> {
+    let json = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e.into()),
     };
 
-    let keys: KeyConfigMap = serde_json::from_str(&config_str)?;
-    Ok(Some(keys))
+    Ok(Some(serde_json::from_str(&json)?))
 }
 
-pub fn save_key_config(path: &str, keys: &KeyConfigMap) -> anyhow::Result<()> {
-    let config_str = serde_json::to_string_pretty(keys)?;
-    std::fs::write(path, config_str)?;
+pub fn save_json<T: Serialize>(path: &str, value: &T) -> anyhow::Result<()> {
+    let json = serde_json::to_string_pretty(value)?;
+    std::fs::write(path, json)?;
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settings {
+    #[serde(default = "default_brightness")]
+    pub brightness: u8,
+}
+
+const fn default_brightness() -> u8 {
+    100
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            brightness: default_brightness(),
+        }
+    }
 }

@@ -8,7 +8,7 @@ use hidapi::HidApi;
 use tokio::sync::broadcast;
 
 use crate::api::{ServerEvent, format_page_path};
-use crate::config::{KeyConfigMap, load_key_config, page_at};
+use crate::config::{KeyConfigMap, Settings, load_json, page_at};
 use crate::icon_cache::IconCache;
 use crate::push_image::{clear_all_keys, load_key_icons, precache_all_icons, set_back_arrow_icon};
 use crate::stream_deck::StreamDeck;
@@ -26,6 +26,7 @@ mod title;
 
 const KEY_COUNT: u8 = StreamDeck::KEY_COUNT;
 const CONFIG_FILE_NAME: &str = "config.json";
+const SETTINGS_FILE_NAME: &str = "settings.json";
 const API_ADDR: &str = "127.0.0.1:3000";
 
 /// On every non-home page, pressing this goes back up a level instead of running its configured action.
@@ -39,6 +40,8 @@ struct AppState {
     /// Key indices from home to the page currently pushed onto the device.
     current_path: Mutex<Vec<u8>>,
     config_path: String,
+    settings: Mutex<Settings>,
+    settings_path: String,
     icon_cache: IconCache,
     /// Broadcasts page changes and key presses to connected `/api/ws` clients,
     /// so the GUI's notion of device state never drifts from the real thing.
@@ -75,6 +78,16 @@ fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn apply_brightness(state: &AppState) -> anyhow::Result<()> {
+    let brightness = state
+        .settings
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .brightness;
+    let device = state.device.lock().unwrap_or_else(PoisonError::into_inner);
+    device.set_brightness(brightness)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let hid = HidApi::new()?;
@@ -94,11 +107,20 @@ async fn main() -> anyhow::Result<()> {
     let icon_cache = IconCache::new();
 
     clear_all_keys(&device, &icon_cache)?;
-    let config_path = config::config_dir()?
+    let config_dir = config::config_dir()?;
+    let config_path = config_dir
         .join(CONFIG_FILE_NAME)
         .to_string_lossy()
         .to_string();
-    let root = load_key_config(&config_path)?.unwrap_or_else(|| {
+    let settings_path = config_dir
+        .join(SETTINGS_FILE_NAME)
+        .to_string_lossy()
+        .to_string();
+    let settings: Settings = load_json(&settings_path)?.unwrap_or_default();
+    if let Err(e) = device.set_brightness(settings.brightness) {
+        eprintln!("Failed to set brightness: {e}");
+    }
+    let root = load_json(&config_path)?.unwrap_or_else(|| {
         println!("No config at {config_path}, skipping");
         KeyConfigMap::new()
     });
@@ -113,6 +135,8 @@ async fn main() -> anyhow::Result<()> {
         root: Mutex::new(root),
         current_path: Mutex::new(Vec::new()),
         config_path,
+        settings: Mutex::new(settings),
+        settings_path,
         icon_cache,
         events: events_tx,
     });
@@ -139,6 +163,9 @@ async fn main() -> anyhow::Result<()> {
                 run_key_action(&poll_state, key_id);
             },
             || {
+                if let Err(e) = apply_brightness(&poll_state) {
+                    eprintln!("Failed to restore brightness after reconnect: {e}");
+                }
                 // The newly (re)connected device can start blank, so redraw
                 // whatever page was on screen before the disconnect.
                 let path = poll_state

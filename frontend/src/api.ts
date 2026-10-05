@@ -29,6 +29,21 @@ export async function getCurrentPage(): Promise<PagePath> {
   return parsePagePath(path);
 }
 
+export async function getBrightness(): Promise<number> {
+  const res = await checkOk(await fetch('/api/brightness'));
+  return res.json();
+}
+
+export async function setBrightness(percent: number): Promise<void> {
+  await checkOk(
+    await fetch('/api/brightness', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(percent),
+    }),
+  );
+}
+
 /** Pushes the page at `path` onto the physical device right away, without waiting for a key press. */
 export async function activatePage(path: PagePath): Promise<void> {
   await checkOk(

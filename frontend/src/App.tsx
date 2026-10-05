@@ -15,6 +15,7 @@ import {
   setKeyTitle,
   subscribeDeviceEvents,
 } from './api';
+import { BrightnessSlider } from './BrightnessSlider';
 import { KeyGrid } from './KeyGrid';
 import { KeySettings } from './KeySettings';
 import { PageBar } from './PageBar';
@@ -227,6 +228,8 @@ function App() {
       <header className="mb-2">
         <h1>Open Deck Settings</h1>
       </header>
+
+      <BrightnessSlider setError={setError} />
 
       {error && (
         <div className="mb-4 rounded-lg border border-accent-border bg-accent-bg px-4 py-3 text-text-h">
