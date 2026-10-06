@@ -4,7 +4,7 @@ use hidapi::{HidApi, HidDevice};
 
 pub const VENDOR_ID: u16 = 0x0fd9;
 const PRODUCT_ID: u16 = 0x006d;
-const KEY_COUNT: u8 = 15;
+pub const KEY_COUNT: u8 = 15;
 
 // Input reports carry a report ID byte plus 3 header bytes before the
 // per-key state bytes start.
@@ -38,6 +38,7 @@ impl StreamDeck {
 
     /// Retries opening the device until it succeeds
     /// Logs once per distinct failure, not on every attempt.
+    #[must_use]
     pub fn open_with_retry(hid: &HidApi) -> Self {
         let mut last_error: Option<String> = None;
         loop {
@@ -72,6 +73,8 @@ impl StreamDeck {
         })
     }
 
+    /// # Errors
+    /// Returns an error if the HID call fails.
     pub fn set_blocking_mode(&self, blocking: bool) -> anyhow::Result<()> {
         self.device.set_blocking_mode(blocking)?;
         Ok(())
@@ -168,6 +171,8 @@ impl StreamDeck {
         }
     }
 
+    /// # Errors
+    /// Returns an error if the HID write fails.
     pub fn set_brightness(&self, percent: u8) -> anyhow::Result<()> {
         let mut report = [0u8; BRIGHTNESS_REPORT_LEN];
         for (dst, src) in report.iter_mut().zip([0x03, 0x08, percent.min(100)]) {
@@ -177,9 +182,12 @@ impl StreamDeck {
         Ok(())
     }
 
-    /// Pushes a pre-encoded JPEG (see [`crate::push_image::ICON_SIZE`] for the
+    /// Pushes a pre-encoded JPEG (see [`crate::ICON_SIZE`] for the
     /// expected dimensions) onto `key`'s screen, chunked into fixed-size
     /// output reports as the device expects.
+    ///
+    /// # Errors
+    /// Returns an error if the HID write fails.
     pub fn push_key_image(&self, key: u8, jpeg: &[u8]) -> anyhow::Result<()> {
         let mut page = 0usize;
         let mut remaining = jpeg.len();

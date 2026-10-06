@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
+use std::{collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -66,7 +66,7 @@ pub fn page_at_mut<'a>(
 }
 
 /// Returns `Ok(None)` if `path` doesn't exist.
-pub fn load_json<T: DeserializeOwned>(path: &str) -> anyhow::Result<Option<T>> {
+pub fn load_json<T: DeserializeOwned>(path: &impl AsRef<Path>) -> anyhow::Result<Option<T>> {
     let json = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -76,7 +76,7 @@ pub fn load_json<T: DeserializeOwned>(path: &str) -> anyhow::Result<Option<T>> {
     Ok(Some(serde_json::from_str(&json)?))
 }
 
-pub fn save_json<T: Serialize>(path: &str, value: &T) -> anyhow::Result<()> {
+pub fn save_json<T: Serialize>(path: &impl AsRef<Path>, value: &T) -> anyhow::Result<()> {
     let json = serde_json::to_string_pretty(value)?;
     std::fs::write(path, json)?;
     Ok(())

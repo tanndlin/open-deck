@@ -9,20 +9,18 @@ use tokio::sync::broadcast;
 
 use crate::api::{ServerEvent, format_page_path};
 use crate::config::{KeyConfigMap, Settings, load_json, page_at};
+use crate::device_extensions::{load_key_icons, precache_all_icons, set_back_arrow_icon};
 use crate::icon_cache::IconCache;
-use crate::push_image::{clear_all_keys, load_key_icons, precache_all_icons, set_back_arrow_icon};
-use crate::stream_deck::StreamDeck;
+use stream_deck::{StreamDeck, clear_all_keys};
 
 mod action;
 mod api;
 mod assets;
 mod config;
+mod device_extensions;
 mod discord;
 mod icon_cache;
 mod infer_icon;
-mod push_image;
-mod stream_deck;
-mod title;
 
 const KEY_COUNT: u8 = StreamDeck::KEY_COUNT;
 const CONFIG_FILE_NAME: &str = "config.json";
@@ -68,7 +66,7 @@ fn switch_to_path(state: &AppState, path: &[u8]) -> anyhow::Result<()> {
     });
 
     let device = state.device.lock().unwrap_or_else(PoisonError::into_inner);
-    clear_all_keys(&device, &state.icon_cache)?;
+    clear_all_keys(&device)?;
     load_key_icons(&device, page, &state.icon_cache);
     // Matches KeyTile.tsx's isBackKey.
     if !path.is_empty() {
@@ -92,36 +90,19 @@ fn apply_brightness(state: &AppState) -> anyhow::Result<()> {
 async fn main() -> anyhow::Result<()> {
     let hid = HidApi::new()?;
 
-    #[cfg(debug_assertions)]
-    for dev in hid.device_list() {
-        if dev.vendor_id() == stream_deck::VENDOR_ID {
-            println!(
-                "Found: {:?} PID={:#06x}",
-                dev.product_string(),
-                dev.product_id()
-            );
-        }
-    }
-
     let device = StreamDeck::open_with_retry(&hid);
     let icon_cache = IconCache::new();
 
-    clear_all_keys(&device, &icon_cache)?;
+    clear_all_keys(&device)?;
     let config_dir = config::config_dir()?;
-    let config_path = config_dir
-        .join(CONFIG_FILE_NAME)
-        .to_string_lossy()
-        .to_string();
-    let settings_path = config_dir
-        .join(SETTINGS_FILE_NAME)
-        .to_string_lossy()
-        .to_string();
+    let config_path = config_dir.join(CONFIG_FILE_NAME);
+    let settings_path = config_dir.join(SETTINGS_FILE_NAME);
     let settings: Settings = load_json(&settings_path)?.unwrap_or_default();
     if let Err(e) = device.set_brightness(settings.brightness) {
         eprintln!("Failed to set brightness: {e}");
     }
-    let root = load_json(&config_path)?.unwrap_or_else(|| {
-        println!("No config at {config_path}, skipping");
+    let root: KeyConfigMap = load_json(&config_path)?.unwrap_or_else(|| {
+        println!("No config at {}, skipping", config_path.display());
         KeyConfigMap::new()
     });
     load_key_icons(&device, &root, &icon_cache);
@@ -134,9 +115,9 @@ async fn main() -> anyhow::Result<()> {
         device: Mutex::new(device),
         root: Mutex::new(root),
         current_path: Mutex::new(Vec::new()),
-        config_path,
+        config_path: config_path.to_string_lossy().to_string(),
         settings: Mutex::new(settings),
-        settings_path,
+        settings_path: settings_path.to_string_lossy().to_string(),
         icon_cache,
         events: events_tx,
     });

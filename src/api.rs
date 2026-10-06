@@ -16,9 +16,9 @@ use tokio::sync::broadcast;
 
 use crate::action::Action;
 use crate::config::{KeyConfig, KeyConfigMap, page_at, page_at_mut, save_json};
+use crate::device_extensions::{FOLDER_ICON_BYTES, clear_key_image, set_folder_icon, set_key_icon};
 use crate::icon_cache::IconCache;
 use crate::infer_icon::infer_icon;
-use crate::push_image::{FOLDER_ICON_BYTES, clear_key_image, set_folder_icon, set_key_icon};
 use crate::{AppState, KEY_COUNT, switch_to_path};
 
 type ApiError = (StatusCode, String);
