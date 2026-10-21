@@ -26,7 +26,7 @@ export function HotkeyField({ action, disabled, onSubmit }: ActionFieldProps) {
     <>
       <ActionTextInput
         label="Keys (joined with +)"
-        placeholder="ctrl+c, escape, del"
+        placeholder="ctrl+c, escape, playpause"
         value={hotkeyInput}
         onChange={setHotkeyInput}
         disabled={disabled}

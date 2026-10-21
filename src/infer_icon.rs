@@ -17,6 +17,7 @@ pub fn infer_icon(action: &Action, cache_dir: &Path) -> Option<String> {
         Action::OpenFolder { .. }
         | Action::TypeText { .. }
         | Action::Hotkey { .. }
+        | Action::MediaKey { .. }
         | Action::DiscordToggleMute
         | Action::DiscordToggleDeafen => None,
     }

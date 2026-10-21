@@ -22,6 +22,10 @@ pub enum Action {
     Hotkey {
         keys: Vec<String>,
     },
+    /// A single media/volume key name, e.g. `"playpause"`. See `parse_key`.
+    MediaKey {
+        key: String,
+    },
     /// Joins the local Discord client to a voice channel by snowflake ID.
     DiscordJoinVoice {
         channel_id: String,
@@ -60,6 +64,11 @@ impl Action {
             Self::Hotkey { keys } => {
                 if let Err(e) = press_hotkey(keys) {
                     eprintln!("Failed to send hotkey '{}': {e}", keys.join("+"));
+                }
+            }
+            Self::MediaKey { key } => {
+                if let Err(e) = press_hotkey(std::slice::from_ref(key)) {
+                    eprintln!("Failed to send media key '{key}': {e}");
                 }
             }
             Self::DiscordJoinVoice { channel_id } => {
@@ -147,6 +156,14 @@ fn parse_key(name: &str) -> Option<Key> {
         "f10" => Key::F10,
         "f11" => Key::F11,
         "f12" => Key::F12,
+        "playpause" | "play" | "pause" => Key::MediaPlayPause,
+        "next" | "nexttrack" => Key::MediaNextTrack,
+        "prev" | "previous" | "prevtrack" => Key::MediaPrevTrack,
+        #[cfg(not(target_os = "macos"))]
+        "stop" => Key::MediaStop,
+        "volumeup" | "volup" => Key::VolumeUp,
+        "volumedown" | "voldown" => Key::VolumeDown,
+        "mute" | "volumemute" => Key::VolumeMute,
         // Lowercased: on Windows, VkKeyScanExW packs shift-state into the same
         // byte range enigo reads back as the virtual-key code, so an uppercase
         // letter (which needs Shift) maps to a bogus key and silently no-ops.

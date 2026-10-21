@@ -4,6 +4,7 @@ interface ActionPayloads {
   open_folder: { path: string };
   type_text: { text: string };
   hotkey: { keys: string[] };
+  media_key: { key: string };
   discord_join_voice: { channel_id: string };
   discord_toggle_mute: Record<never, never>;
   discord_toggle_deafen: Record<never, never>;
@@ -25,6 +26,7 @@ const ACTION_LABELS = {
   open_folder: 'Open folder',
   type_text: 'Type text',
   hotkey: 'Hotkey',
+  media_key: 'Media key',
   discord_join_voice: 'Join Discord voice channel',
   discord_toggle_mute: 'Toggle Discord mute',
   discord_toggle_deafen: 'Toggle Discord deafen',
@@ -37,6 +39,16 @@ export const ACTION_TYPES = Object.entries(ACTION_LABELS).map(
     label,
   }),
 );
+
+export const MEDIA_KEYS = [
+  { value: 'playpause', label: 'Play / pause' },
+  { value: 'next', label: 'Next track' },
+  { value: 'prev', label: 'Previous track' },
+  { value: 'stop', label: 'Stop' },
+  { value: 'volumeup', label: 'Volume up' },
+  { value: 'volumedown', label: 'Volume down' },
+  { value: 'mute', label: 'Mute system audio' },
+];
 
 /** Short one-line preview of an action's payload, for compact list rows. */
 export function actionSummary(action: KeyAction | undefined): string {
@@ -52,6 +64,10 @@ export function actionSummary(action: KeyAction | undefined): string {
       return action.text;
     case 'hotkey':
       return action.keys.join('+');
+    case 'media_key':
+      return (
+        MEDIA_KEYS.find((k) => k.value === action.key)?.label ?? action.key
+      );
     case 'discord_join_voice':
       return action.channel_id;
     case 'discord_toggle_mute':

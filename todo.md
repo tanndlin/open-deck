@@ -7,7 +7,7 @@
 - [x] Frontend action fields for both
 
 ## Media keys
-- [ ] Add media/volume names to `parse_key` (`Key::MediaPlayPause`, `MediaNextTrack`, `MediaPrevTrack`, `VolumeUp`, `VolumeDown`, `VolumeMute`)
+- [x] Add media/volume names to `parse_key` (`Key::MediaPlayPause`, `MediaNextTrack`, `MediaPrevTrack`, `VolumeUp`, `VolumeDown`, `VolumeMute`)
 
 ## HTTP request action
 - [ ] `HttpRequest { method, url, headers, body }` action using `ureq`
@@ -18,3 +18,4 @@
 - [ ] "Dynamic" key type whose image is driven by an integration
 - [ ] Discord mute/deafen keys reflect state via `VOICE_SETTINGS_UPDATE`
 - [ ] Clock / system stats rendered with `stream_deck/src/title.rs`
+
