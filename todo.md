@@ -10,8 +10,8 @@
 - [x] Add media/volume names to `parse_key` (`Key::MediaPlayPause`, `MediaNextTrack`, `MediaPrevTrack`, `VolumeUp`, `VolumeDown`, `VolumeMute`)
 
 ## HTTP request action
-- [ ] `HttpRequest { method, url, headers, body }` action using `ureq`
-- [ ] Frontend action field
+- [x] `HttpRequest { method, url, headers, body }` action using `ureq`
+- [x] Frontend action field
 
 ## Live key state
 - [ ] Background task that owns the device handle and can push key image/title updates at runtime

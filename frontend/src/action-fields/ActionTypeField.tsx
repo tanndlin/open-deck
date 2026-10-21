@@ -1,6 +1,7 @@
 import type { ActionType, KeyAction } from '../types';
 import { DiscordJoinVoiceField } from './DiscordJoinVoiceField';
 import { HotkeyField } from './HotkeyField';
+import { HttpRequestField } from './HttpRequestField';
 import { MediaKeyField } from './MediaKeyField';
 import { MultiActionField } from './MultiActionField';
 import { OpenFolderField } from './OpenFolderField';
@@ -59,6 +60,14 @@ export function ActionTypeField({
     case 'media_key':
       return (
         <MediaKeyField
+          action={action}
+          disabled={disabled}
+          onSubmit={onSubmit}
+        />
+      );
+    case 'http_request':
+      return (
+        <HttpRequestField
           action={action}
           disabled={disabled}
           onSubmit={onSubmit}

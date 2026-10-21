@@ -26,6 +26,16 @@ pub enum Action {
     MediaKey {
         key: String,
     },
+    /// Sends an HTTP request, e.g. to trigger a webhook. The response is ignored
+    /// beyond logging a failure status.
+    HttpRequest {
+        method: String,
+        url: String,
+        #[serde(default)]
+        headers: Vec<HttpHeader>,
+        #[serde(default)]
+        body: String,
+    },
     /// Joins the local Discord client to a voice channel by snowflake ID.
     DiscordJoinVoice {
         channel_id: String,
@@ -36,6 +46,12 @@ pub enum Action {
     Multi {
         actions: Vec<Self>,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpHeader {
+    pub name: String,
+    pub value: String,
 }
 
 impl Action {
@@ -71,6 +87,16 @@ impl Action {
                     eprintln!("Failed to send media key '{key}': {e}");
                 }
             }
+            Self::HttpRequest {
+                method,
+                url,
+                headers,
+                body,
+            } => {
+                if let Err(e) = send_http_request(method, url, headers, body) {
+                    eprintln!("Failed to send {method} request to '{url}': {e}");
+                }
+            }
             Self::DiscordJoinVoice { channel_id } => {
                 if let Err(e) = crate::discord::join_voice_channel(channel_id) {
                     eprintln!("Failed to join Discord voice channel '{channel_id}': {e}");
@@ -93,6 +119,25 @@ impl Action {
             }
         }
     }
+}
+
+fn send_http_request(
+    method: &str,
+    url: &str,
+    headers: &[HttpHeader],
+    body: &str,
+) -> anyhow::Result<()> {
+    let mut builder = ureq::http::Request::builder().method(method).uri(url);
+    for header in headers {
+        builder = builder.header(&header.name, &header.value);
+    }
+    // ureq refuses any body, even an empty one, on methods like GET.
+    if body.is_empty() {
+        ureq::run(builder.body(())?)?;
+    } else {
+        ureq::run(builder.body(body)?)?;
+    }
+    Ok(())
 }
 
 fn type_text(text: &str) -> anyhow::Result<()> {

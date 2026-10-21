@@ -5,6 +5,12 @@ interface ActionPayloads {
   type_text: { text: string };
   hotkey: { keys: string[] };
   media_key: { key: string };
+  http_request: {
+    method: string;
+    url: string;
+    headers: { name: string; value: string }[];
+    body: string;
+  };
   discord_join_voice: { channel_id: string };
   discord_toggle_mute: Record<never, never>;
   discord_toggle_deafen: Record<never, never>;
@@ -27,6 +33,7 @@ const ACTION_LABELS = {
   type_text: 'Type text',
   hotkey: 'Hotkey',
   media_key: 'Media key',
+  http_request: 'HTTP request',
   discord_join_voice: 'Join Discord voice channel',
   discord_toggle_mute: 'Toggle Discord mute',
   discord_toggle_deafen: 'Toggle Discord deafen',
@@ -68,6 +75,8 @@ export function actionSummary(action: KeyAction | undefined): string {
       return (
         MEDIA_KEYS.find((k) => k.value === action.key)?.label ?? action.key
       );
+    case 'http_request':
+      return `${action.method} ${action.url}`;
     case 'discord_join_voice':
       return action.channel_id;
     case 'discord_toggle_mute':

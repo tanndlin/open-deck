@@ -2,11 +2,11 @@ use std::path::Path;
 
 use crate::action::Action;
 
-/// Best-effort: `OpenUrl` uses the site's favicon, `RunCommand` uses the
+/// Best-effort: `OpenUrl` and `HttpRequest` use the site's favicon, `RunCommand` uses the
 /// program's own icon (Windows only). `None` means leave the key without one.
 pub fn infer_icon(action: &Action, cache_dir: &Path) -> Option<String> {
     match action {
-        Action::OpenUrl { url } => favicon_url(url),
+        Action::OpenUrl { url } | Action::HttpRequest { url, .. } => favicon_url(url),
         Action::RunCommand { command } => command_icon(command, cache_dir),
         Action::DiscordJoinVoice { channel_id } => {
             crate::discord::guild_icon_for_channel(channel_id)
