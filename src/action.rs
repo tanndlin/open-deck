@@ -26,6 +26,8 @@ pub enum Action {
     DiscordJoinVoice {
         channel_id: String,
     },
+    DiscordToggleMute,
+    DiscordToggleDeafen,
     /// Runs each sub-action in order.
     Multi {
         actions: Vec<Self>,
@@ -63,6 +65,16 @@ impl Action {
             Self::DiscordJoinVoice { channel_id } => {
                 if let Err(e) = crate::discord::join_voice_channel(channel_id) {
                     eprintln!("Failed to join Discord voice channel '{channel_id}': {e}");
+                }
+            }
+            Self::DiscordToggleMute => {
+                if let Err(e) = crate::discord::toggle_mute() {
+                    eprintln!("Failed to toggle Discord mute: {e}");
+                }
+            }
+            Self::DiscordToggleDeafen => {
+                if let Err(e) = crate::discord::toggle_deafen() {
+                    eprintln!("Failed to toggle Discord deafen: {e}");
                 }
             }
             Self::Multi { actions } => {

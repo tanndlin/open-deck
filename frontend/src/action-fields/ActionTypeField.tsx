@@ -5,6 +5,7 @@ import { MultiActionField } from './MultiActionField';
 import { OpenFolderField } from './OpenFolderField';
 import { OpenUrlField } from './OpenUrlField';
 import { RunCommandField } from './RunCommandField';
+import { SetActionButton } from './SetActionButton';
 import { TypeTextField } from './TypeTextField';
 
 interface ActionTypeFieldProps {
@@ -60,6 +61,14 @@ export function ActionTypeField({
           action={action}
           disabled={disabled}
           onSubmit={onSubmit}
+        />
+      );
+    case 'discord_toggle_mute':
+    case 'discord_toggle_deafen':
+      return (
+        <SetActionButton
+          disabled={disabled}
+          onClick={() => onSubmit({ type: actionType })}
         />
       );
     case 'multi':

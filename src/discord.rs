@@ -15,6 +15,7 @@ const DISCORD_CONFIG_FILE_NAME: &str = "discord_config.json";
 const RPC_VERSION: u32 = 1;
 const OP_HANDSHAKE: u32 = 0;
 const OP_FRAME: u32 = 1;
+const SCOPES: &[&str] = &["rpc", "rpc.voice.read", "rpc.voice.write"];
 
 #[cfg(windows)]
 type PipeStream = std::fs::File;
@@ -123,6 +124,35 @@ pub fn join_voice_channel(channel_id: &str) -> anyhow::Result<()> {
             "SELECT_VOICE_CHANNEL",
             &json!({ "channel_id": target_channel_id, "force": true }),
         )?;
+        if is_error(&response) {
+            anyhow::bail!("Discord RPC error: {}", error_message(&response));
+        }
+        Ok(())
+    })
+}
+
+pub fn toggle_mute() -> anyhow::Result<()> {
+    toggle_voice_setting("mute")
+}
+
+pub fn toggle_deafen() -> anyhow::Result<()> {
+    toggle_voice_setting("deaf")
+}
+
+/// Flips a boolean field of the client's voice settings (`mute` or `deaf`).
+fn toggle_voice_setting(field: &str) -> anyhow::Result<()> {
+    with_session(|pipe| {
+        let current = send_command(pipe, "GET_VOICE_SETTINGS", &json!({}))?;
+        if is_error(&current) {
+            anyhow::bail!("Discord RPC error: {}", error_message(&current));
+        }
+        let enabled = current
+            .get("data")
+            .and_then(|d| d.get(field))
+            .and_then(Value::as_bool)
+            .ok_or_else(|| anyhow::anyhow!("voice settings had no '{field}': {current}"))?;
+
+        let response = send_command(pipe, "SET_VOICE_SETTINGS", &json!({ field: !enabled }))?;
         if is_error(&response) {
             anyhow::bail!("Discord RPC error: {}", error_message(&response));
         }
@@ -256,17 +286,28 @@ fn error_message(response: &Value) -> &str {
         .unwrap_or("unknown error")
 }
 
+enum AuthOutcome {
+    Authenticated,
+    /// Authenticated, but with a token missing some of [`SCOPES`]. The
+    /// connection can't be re-authorized once authenticated, so a fresh one
+    /// is needed before prompting for the missing scopes.
+    MissingScopes,
+    Rejected,
+}
+
 /// Authenticates the IPC session, reusing a saved access token when
 /// possible. Falls back to a full authorize + `OAuth2` code exchange
 /// (which pops an in-client "Authorize" dialog for the user) otherwise. An
 /// expired access token is silently refreshed via the saved refresh token
 /// when possible, so re-authorizing only prompts the user when that fails
-/// too (e.g. the grant was revoked).
+/// too (e.g. the grant was revoked) or the token lacks a newly added scope.
 fn authenticate(pipe: &mut PipeStream, config: &mut DiscordConfig) -> anyhow::Result<()> {
-    if let Some(token) = config.access_token.clone()
-        && try_authenticate(pipe, &token)?
-    {
-        return Ok(());
+    if let Some(token) = config.access_token.clone() {
+        match try_authenticate(pipe, &token)? {
+            AuthOutcome::Authenticated => return Ok(()),
+            AuthOutcome::MissingScopes => return reauthorize(pipe, config),
+            AuthOutcome::Rejected => {}
+        }
     }
 
     if let Some(refresh_token) = config.refresh_token.clone()
@@ -276,38 +317,70 @@ fn authenticate(pipe: &mut PipeStream, config: &mut DiscordConfig) -> anyhow::Re
         config.refresh_token = Some(new_refresh_token);
         save_config(config)?;
 
-        if try_authenticate(pipe, &access_token)? {
-            return Ok(());
+        match try_authenticate(pipe, &access_token)? {
+            AuthOutcome::Authenticated => return Ok(()),
+            AuthOutcome::MissingScopes => return reauthorize(pipe, config),
+            AuthOutcome::Rejected => {}
         }
     }
 
+    authorize_and_authenticate(pipe, config)
+}
+
+fn reauthorize(pipe: &mut PipeStream, config: &mut DiscordConfig) -> anyhow::Result<()> {
+    *pipe = connect_pipe()?;
+    handshake(pipe, &config.client_id)?;
+    authorize_and_authenticate(pipe, config)
+}
+
+fn authorize_and_authenticate(
+    pipe: &mut PipeStream,
+    config: &mut DiscordConfig,
+) -> anyhow::Result<()> {
     let code = authorize(pipe, &config.client_id)?;
     let (access_token, refresh_token) = exchange_code(config, &code)?;
     config.access_token = Some(access_token.clone());
     config.refresh_token = Some(refresh_token);
     save_config(config)?;
 
-    if !try_authenticate(pipe, &access_token)? {
-        anyhow::bail!("Discord rejected the freshly authorized access token");
+    match try_authenticate(pipe, &access_token)? {
+        AuthOutcome::Authenticated => Ok(()),
+        AuthOutcome::MissingScopes => anyhow::bail!(
+            "Discord didn't grant all of {SCOPES:?}; the application may not be allowed those scopes"
+        ),
+        AuthOutcome::Rejected => {
+            anyhow::bail!("Discord rejected the freshly authorized access token")
+        }
     }
-    Ok(())
 }
 
-/// Returns `true` if `access_token` authenticated the session.
-fn try_authenticate(pipe: &mut PipeStream, access_token: &str) -> anyhow::Result<bool> {
+fn try_authenticate(pipe: &mut PipeStream, access_token: &str) -> anyhow::Result<AuthOutcome> {
     let response = send_command(
         pipe,
         "AUTHENTICATE",
         &json!({ "access_token": access_token }),
     )?;
-    Ok(!is_error(&response))
+    if is_error(&response) {
+        return Ok(AuthOutcome::Rejected);
+    }
+    let granted: Vec<&str> = response
+        .get("data")
+        .and_then(|d| d.get("scopes"))
+        .and_then(Value::as_array)
+        .map(|scopes| scopes.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    if SCOPES.iter().all(|scope| granted.contains(scope)) {
+        Ok(AuthOutcome::Authenticated)
+    } else {
+        Ok(AuthOutcome::MissingScopes)
+    }
 }
 
 fn authorize(pipe: &mut PipeStream, client_id: &str) -> anyhow::Result<String> {
     let response = send_command(
         pipe,
         "AUTHORIZE",
-        &json!({ "client_id": client_id, "scopes": ["rpc"] }),
+        &json!({ "client_id": client_id, "scopes": SCOPES }),
     )?;
     if is_error(&response) {
         anyhow::bail!(

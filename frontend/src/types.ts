@@ -5,6 +5,8 @@ interface ActionPayloads {
   type_text: { text: string };
   hotkey: { keys: string[] };
   discord_join_voice: { channel_id: string };
+  discord_toggle_mute: Record<never, never>;
+  discord_toggle_deafen: Record<never, never>;
   multi: { actions: KeyAction[] };
 }
 
@@ -24,6 +26,8 @@ const ACTION_LABELS = {
   type_text: 'Type text',
   hotkey: 'Hotkey',
   discord_join_voice: 'Join Discord voice channel',
+  discord_toggle_mute: 'Toggle Discord mute',
+  discord_toggle_deafen: 'Toggle Discord deafen',
   multi: 'Multiple actions',
 } satisfies Record<ActionType, string>;
 
@@ -50,6 +54,9 @@ export function actionSummary(action: KeyAction | undefined): string {
       return action.keys.join('+');
     case 'discord_join_voice':
       return action.channel_id;
+    case 'discord_toggle_mute':
+    case 'discord_toggle_deafen':
+      return '';
     case 'multi':
       return `${action.actions.length} action${action.actions.length === 1 ? '' : 's'}`;
   }

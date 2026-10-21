@@ -14,7 +14,11 @@ pub fn infer_icon(action: &Action, cache_dir: &Path) -> Option<String> {
                 .flatten()
         }
         Action::Multi { actions } => actions.first().and_then(|a| infer_icon(a, cache_dir)),
-        Action::OpenFolder { .. } | Action::TypeText { .. } | Action::Hotkey { .. } => None,
+        Action::OpenFolder { .. }
+        | Action::TypeText { .. }
+        | Action::Hotkey { .. }
+        | Action::DiscordToggleMute
+        | Action::DiscordToggleDeafen => None,
     }
 }
 
